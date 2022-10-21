@@ -251,6 +251,11 @@ class MaskedAutoencoderViT(nn.Module):
         mask: [N, L], 0 is keep, 1 is remove, 
         ssl_masks: [N, 1, H, W] 0 is keep, 1 is remove
         """
+        N,L,_=pred.shape
+        if self.ssl_loss:
+            imgs = torch.cat((imgs,imgs),0)
+            ssl_masks = torch.cat((ssl_masks, ssl_masks),0)
+
         sp_masks = torch.zeros(ssl_masks.shape, device=imgs.device)
         sp_masks[ssl_masks==0]=1
 
@@ -268,25 +273,25 @@ class MaskedAutoencoderViT(nn.Module):
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         #loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss = loss.sum() # mean loss on every patches
+        loss = loss.sum() / (N*L) # mean loss on every patches
 
         if self.ssl_loss:
             sslloss = self.get_ssl_loss(pred, ssl_masks)
-            loss += sslloss
+            loss = (loss+sslloss)/2
         return loss
     
     def get_ssl_loss(self, pred, ssl_masks):
         #self-supervised loss for missing ground-truth pixels
         #to maximize the same semantic information of each input with different mask augmentations
-        b = pred.shape[0]
+        N,L,_ = pred.shape
         sslloss=0
-        for i in range(int(b/2)):
+        for i in range(int(N/2)):
             pred1 = pred[i,:,:]
-            pred2 = pred[i+int(b/2),:,:]
+            pred2 = pred[i+int(N/2),:,:]
             mask = ssl_masks[i,:,:]
             loss = (pred1-pred2)**2
 
-            loss = (loss*mask).sum()
+            loss = (loss*mask).sum()/(N*L)
             # loss = loss.sum() #mean loss on every piexles
 
             sslloss+=loss
