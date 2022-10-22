@@ -11,7 +11,7 @@ from torch.autograd import Variable
 def calc_metrics(x, out, target, data_range=1, window_size=11, channel=1, size_average=True):
 
     #normalize
-    x, out, target = normalize(x, out, target)
+    # x, out, target = normalize(x, out, target)
     
     #compute nmse
     noise_nmse = compute_NMSE(x, target)
@@ -35,16 +35,13 @@ def calc_metrics(x, out, target, data_range=1, window_size=11, channel=1, size_a
 
     return results
 
-def normalize(*img, eps=1e-08):
-    def _normalize(img, eps=eps):
-        max = torch.max(img)
-        min = torch.min(img)
-        img = (img-min)/(max-min+eps)
-        return img
-    if len(img)==1:
-        return _normalize(img[0])
-    else:
-        return [_normalize(im) for im in img]
+def normalize(x, out, target, eps=1e-08):
+    max = torch.max(x)
+    min = torch.min(x)
+    x = (x-min)/(max-min+eps)
+    out = torch.clamp((out-min)/(max-min+eps), min=0, max=1)
+    target = torch.clamp((target-min)/(max-min+eps), min=0, max=1)
+    return [x, out, target]
     
 
 def compute_NMSE(pred, gt):

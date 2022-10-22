@@ -25,7 +25,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl_loss=False, no_center_mask=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl_loss=False, ssl_weight=1, no_center_mask=False):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -60,6 +60,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.norm_pix_loss = norm_pix_loss
         self.ssl_loss = ssl_loss
+        self.ssl_weight = ssl_weight
         self.no_center_mask = no_center_mask
         self.train = True
         self.img_size = img_size
@@ -250,6 +251,7 @@ class MaskedAutoencoderViT(nn.Module):
         pred: [N, L, p*p*2]
         mask: [N, L], 0 is keep, 1 is remove, 
         ssl_masks: [N, 1, H, W] 0 is keep, 1 is remove
+        sp_masks: [N, 1, H, W] 0 is remove, 1 is keep
         """
         N,L,_=pred.shape
         if self.ssl_loss:
@@ -268,16 +270,18 @@ class MaskedAutoencoderViT(nn.Module):
             var = target.var(dim=-1, keepdim=True)
             target = (target - mean) / (var + 1.e-6)**.5
 
-        loss = (pred - target) ** 2
+        # loss = (pred - target) ** 2
+        loss = torch.abs(pred - target)
         loss = loss*sp_masks
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        #loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss = loss.sum() / N # mean loss on every patches
+        # loss = (loss * mask).sum() / N  # mean loss on removed patches
+        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        # loss = loss.sum() / N # mean loss on every patches
 
         if self.ssl_loss:
             sslloss = self.get_ssl_loss(pred, ssl_masks)
-            loss = (loss+sslloss)/2
+            loss = loss+self.ssl_weight*sslloss
         return loss
     
     def get_ssl_loss(self, pred, ssl_masks):
@@ -289,9 +293,10 @@ class MaskedAutoencoderViT(nn.Module):
             pred1 = pred[i,:,:]
             pred2 = pred[i+int(N/2),:,:]
             mask = ssl_masks[i,:,:]
-            loss = (pred1-pred2)**2
+            # loss = (pred1-pred2)**2
+            loss = torch.abs(pred1-pred2)
 
-            loss = (loss*mask).sum()/N*2
+            loss = (loss*mask).sum()/N/L*2
             # loss = loss.sum() #mean loss on every piexles
 
             sslloss+=loss
@@ -300,10 +305,11 @@ class MaskedAutoencoderViT(nn.Module):
     def forward(self, imgs, ssl_masks, mask_ratio=0.75, num_low_freqs=None):
         latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio, num_low_freqs)
         pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        loss = self.forward_loss(imgs, pred, mask, ssl_masks) #mask: 0 is keep, 1 is remove
         if self.train:
+            loss = self.forward_loss(imgs, pred, mask, ssl_masks) #mask: 0 is keep, 1 is remove
             return loss, pred, mask
         else: 
+            loss = None
             return loss, self.unpatchify(pred), mask
 
 

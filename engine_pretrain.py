@@ -10,7 +10,9 @@
 # --------------------------------------------------------
 import math
 import sys
+import os
 from typing import Iterable
+import imageio
 
 import torch
 
@@ -42,8 +44,8 @@ def train_one_epoch(model: torch.nn.Module,
     for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
-        if data_iter_step % accum_iter == 0:
-            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
+        # if data_iter_step % accum_iter == 0:
+        #     lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
 
         samples = data['down'].to(device, non_blocking=True)
         ssl_masks = data['mask'].to(device, non_blocking=True)
@@ -62,6 +64,9 @@ def train_one_epoch(model: torch.nn.Module,
         loss /= accum_iter
         loss_scaler(loss, optimizer, parameters=model.parameters(),
                     update_grad=(data_iter_step + 1) % accum_iter == 0)
+        # loss.backward()
+        # optimizer.step()
+
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
 
@@ -80,8 +85,14 @@ def train_one_epoch(model: torch.nn.Module,
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
-
-
+        # i=0
+        # for name, param in model.named_parameters():
+        #     i+=1
+        #     if i==9 and param.requires_grad:
+        #         print(name)
+        #         print('during model.params: \n', param.data)
+        #         print('during model.params.grad: \n', param.grad)
+        #         break
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
@@ -99,18 +110,41 @@ def valid_one_epoch(model: torch.nn.Module,
     valid_stats = {k:0 for k in keys}
     vnum = len(data_loader)
 
+    save_folder = os.path.join(args.output_dir, 'valid_epoch{}'.format(epoch))
+    if not os.path.exists(save_folder):
+        os.mkdir(save_folder)
+
     with torch.no_grad():
-        for data in data_loader:
+        for i, data in enumerate(data_loader):
             samples = data['down'].to(device, non_blocking=True)
-            ssl_masks = data['mask'].to(device, non_blocking=True)
+            ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            loss, pred, _  = model(samples, ssl_masks)
+            _, pred, _  = model(samples, ssl_masks)
+
+            # Data consistency
+            pred = torch.clamp(pred, min=-1, max=1)
+            pred = samples + pred*ssl_masks
             
             samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full_samples[0,:,:,:], permute=True) 
             
+            #normalization [0-1]
+            max = torch.max(samples)
+            min = torch.min(samples)
+            samples = torch.clamp((samples-min)/(max-min), min=0, max=1)
+            pred = torch.clamp((pred-min)/(max-min), min=0, max=1)
+            full = torch.clamp((full-min)/(max-min), min=0, max=1)
+            
+            #calculate psnr, ssim
             stat = calc_metrics(samples.unsqueeze(0), pred.unsqueeze(0), full.unsqueeze(0))
             for k,v in stat.items():
                 valid_stats[k]+=v/vnum
+            
+            #image save
+            if i%50==0:
+                imageio.imwrite(os.path.join(save_folder, 'down_{:03d}.tif'.format(int(i/10))), samples.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_folder, 'pred_{:03d}.tif'.format(int(i/10))), pred.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_folder, 'full_{:03d}.tif'.format(int(i/10))), full.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_folder, 'concat_{:03d}.tif'.format(int(i/10))), torch.cat([samples, pred, full], dim=-1).cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats

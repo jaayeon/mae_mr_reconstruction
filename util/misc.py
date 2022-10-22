@@ -266,7 +266,11 @@ class NativeScalerWithGradNormCount:
                 norm = get_grad_norm_(parameters)
             self._scaler.step(optimizer)
             self._scaler.update()
+            # for param in parameters:
+            #     print('in nativescaler: \n', param)
+            #     break
         else:
+            # print('no update_grad')
             norm = None
         return norm
 
@@ -296,7 +300,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, be
     output_dir = Path(args.output_dir)
     epoch_name = str(epoch)
     if loss_scaler is not None:
-        checkpoint_paths = [output_dir / ('checkpoint-%s.pth'.format('best' if best else epoch_name))]
+        checkpoint_paths = [output_dir / ('checkpoint-{}.pth'.format('best' if best else epoch_name))]
         for checkpoint_path in checkpoint_paths:
             to_save = {
                 'model': model_without_ddp.state_dict(),

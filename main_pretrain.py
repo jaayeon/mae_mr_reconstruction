@@ -69,7 +69,8 @@ def get_args_parser():
     parser.set_defaults(norm_pix_loss=False)
     parser.add_argument('--ssl_loss', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
-
+    parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
+    
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
                         help='weight decay (default: 0.05)')
@@ -90,6 +91,7 @@ def get_args_parser():
     parser.add_argument('--down_factor', type=int, default=2, help='downsampling factor of original data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
     parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
+
     # Dataset parameters
     parser.add_argument('--data_path', default='../../data/', type=str,
                         help='dataset path')
@@ -160,7 +162,7 @@ def main(args):
     '''
     dataset = IXIDataset(args, mode='train')
 
-    tnum = int(len(dataset)*0.9)
+    tnum = int(len(dataset)*0.95)
     vnum = len(dataset)-tnum
     dataset_train, dataset_valid = torch.utils.data.random_split(dataset, [tnum, vnum])
 
@@ -197,7 +199,8 @@ def main(args):
         drop_last=False
     )
     # define the model
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl_loss=args.ssl_loss, no_center_mask=args.no_center_mask)
+    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl_loss=args.ssl_loss, 
+                                            ssl_weight=args.ssl_weight, no_center_mask=args.no_center_mask)
 
     model.to(device)
 
@@ -237,12 +240,28 @@ def main(args):
         # train
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
+        # i=0
+        # for name, param in model.named_parameters():
+        #     i+=1
+        #     if i==9 and param.requires_grad:
+        #         print(name)
+        #         print('before model.params: \n', param.data)
+        #         print('before model.params.grad: \n', param.grad)
+        #         break
         train_stats = train_one_epoch(
             model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
             args=args
         )
+        # i=0
+        # for name, param in model.named_parameters():
+        #     i+=1
+        #     if i==9 and param.requires_grad:
+        #         print(name)
+        #         print('after model.params: \n', param.data)
+        #         print('after model.params.grad: \n', param.grad)
+        #         break
         if args.output_dir and (epoch % 50 == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -258,36 +277,14 @@ def main(args):
                 f.write(json.dumps(train_log_stats) + "\n")
         
         # validation
-
         valid_stats = valid_one_epoch(
             model, data_loader_valid, 
             device, epoch, args=args
         )
-
         valid_log_stats = {**{f'valid_{k}': v.item() for k,v in valid_stats.items()}, 'epoch':epoch,}
-        
-        """ model.train=False
-        keys=['noise_loss', 'loss', 'noise_psnr', 'psnr', 'noise_ssim', 'ssim', 'noise_nmse', 'nmse']
-        valid_log_stats = {k:0 for k in keys}
-        vnum = len(data_loader_valid)
-        for data in data_loader_valid:
-            with torch.no_grad():
-                samples = data['down'].to(device, non_blocking=True)
-                ssl_masks = data['mask'].to(device, non_blocking=True)
-                full_samples = data['full'].to(device, non_blocking=True)
-                loss, pred, _  = model(samples, ssl_masks)
-                
-                samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full_samples[0,:,:,:], permute=True) 
-                
-                stat = calc_metrics(samples.unsqueeze(0), pred.unsqueeze(0), full.unsqueeze(0))
-                for k,v in stat.items():
-                    valid_log_stats[k]+=v/vnum
 
-        print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_log_stats.items()])))
-        valid_log_stats = {**{f'valid_{k}': v.item() for k,v in valid_log_stats.items()}, 'epoch':epoch,} 
-        """
         if valid_log_stats['valid_psnr']>best_psnr:
-            'Save Best Checkpoint'
+            print('Save Best Checkpoint')
             best_psnr = valid_log_stats['valid_psnr']
             #save
             misc.save_model(
