@@ -107,7 +107,7 @@ def get_args_parser():
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint')
 
-    parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
+    parser.add_argument('--start_epoch', default=1, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin_mem', action='store_true',
