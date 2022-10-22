@@ -144,7 +144,7 @@ def valid_one_epoch(model: torch.nn.Module,
                 imageio.imwrite(os.path.join(save_folder, 'down_{:03d}.tif'.format(int(i/10))), samples.squeeze().cpu().numpy())
                 imageio.imwrite(os.path.join(save_folder, 'pred_{:03d}.tif'.format(int(i/10))), pred.squeeze().cpu().numpy())
                 imageio.imwrite(os.path.join(save_folder, 'full_{:03d}.tif'.format(int(i/10))), full.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_folder, 'concat_{:03d}.tif'.format(int(i/10))), torch.cat([samples, pred, full], dim=-1).cpu().numpy())
+                imageio.imwrite(os.path.join(save_folder, 'concat_{:03d}.tif'.format(int(i/10))), torch.cat([samples, pred, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats
