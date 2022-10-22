@@ -273,7 +273,7 @@ class MaskedAutoencoderViT(nn.Module):
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         #loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss = loss.sum() / (N*L) # mean loss on every patches
+        loss = loss.sum() / N # mean loss on every patches
 
         if self.ssl_loss:
             sslloss = self.get_ssl_loss(pred, ssl_masks)
@@ -291,7 +291,7 @@ class MaskedAutoencoderViT(nn.Module):
             mask = ssl_masks[i,:,:]
             loss = (pred1-pred2)**2
 
-            loss = (loss*mask).sum()/(N*L)
+            loss = (loss*mask).sum()/N*2
             # loss = loss.sum() #mean loss on every piexles
 
             sslloss+=loss
