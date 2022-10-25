@@ -88,7 +88,7 @@ def get_args_parser():
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')
-    parser.add_argument('--down_factor', type=int, default=2, help='downsampling factor of original data')
+    parser.add_argument('--downsample', type=int, default=2, help='downsampling factor of original data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
     parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
 
@@ -111,7 +111,7 @@ def get_args_parser():
     parser.add_argument('--detect_anomaly', action='store_true', 
                         help='torch.autograd.set_detect_anomaly(true), but very slow (7~8 times)')
     parser.add_argument('--autocast', action='store_true', 
-                        help='set torch.cuda.amp.autocast(): float32 -> float16. (0.7/N)*(0.5N)=0.35 faster, but sth cause nan value...')
+                        help='set torch.cuda.amp.autocast(): float32 -> float16. 0.6 faster, but sth cause nan value...')
 
     parser.add_argument('--start_epoch', default=1, type=int, metavar='N',
                         help='start epoch')
