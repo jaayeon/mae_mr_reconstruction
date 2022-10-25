@@ -11,6 +11,7 @@
 
 from functools import partial
 
+import math
 import torch
 import torch.nn as nn
 
@@ -279,9 +280,14 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         # loss = loss.sum() / N # mean loss on every patches
 
+        # if not torch.isfinite(loss):
+        #     print("sploss is {}, stopping training".format(loss))
+
         if self.ssl_loss:
             sslloss = self.get_ssl_loss(pred, ssl_masks)
             loss = loss+self.ssl_weight*sslloss
+            # if not torch.isfinite(sslloss):
+            #     print('sslloss is {}, stopping training'.format(sslloss))
         return loss
     
     def get_ssl_loss(self, pred, ssl_masks):
