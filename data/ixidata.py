@@ -30,7 +30,7 @@ class IXIDataset(Dataset):
 
         #downsample
         self.down = opt.down
-        self.down_factor = opt.down_factor
+        self.down_factor = opt.downsample
         self.low_freq_ratio = opt.low_freq_ratio
         self.rng = np.random.RandomState(opt.seed)
 
