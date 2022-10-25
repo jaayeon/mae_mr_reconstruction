@@ -97,6 +97,7 @@ def get_args_parser():
                         help='dataset path')
     parser.add_argument('--dataset', default='ixi', choices=['ixi', 'fastmri'])
 
+    # Learning
     parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
@@ -105,7 +106,12 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
-                        help='resume from checkpoint')
+                        help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
+    parser.add_argument('--note', default='base', type=str, help='add to checkpoint base name')
+    parser.add_argument('--detect_anomaly', action='store_true', 
+                        help='torch.autograd.set_detect_anomaly(true), but very slow (7~8 times)')
+    parser.add_argument('--autocast', action='store_true', 
+                        help='set torch.cuda.amp.autocast(): float32 -> float16. 0.7 faster, but sth cause nan value...')
 
     parser.add_argument('--start_epoch', default=1, type=int, metavar='N',
                         help='start epoch')
@@ -129,16 +135,22 @@ def get_args_parser():
 
 def main(args):
     misc.init_distributed_mode(args)
+    if args.detect_anomaly:
+        torch.autograd.set_detect_anomaly(True)
 
     print('job dir: {}'.format(os.path.dirname(os.path.realpath(__file__))))
     print("{}".format(args).replace(', ', ',\n'))
 
     # set checkpoint saving directory
     dt = datetime.datetime.now()
-    base = '{}_{}'.format(dt.strftime('%m%d'), 'mae')
-    args.output_dir = os.path.join(args.output_dir, base)
-    if not os.path.exists(args.output_dir):
-        os.mkdir(args.output_dir)
+    if not args.resume:
+        base = '{}_{}'.format(dt.strftime('%m%d'), args.note)
+        args.output_dir = os.path.join(args.output_dir, base)
+        if not os.path.exists(args.output_dir):
+            os.mkdir(args.output_dir)
+    else:
+        args.resume = os.path.join(args.output_dir, args.resume)
+        args.output_dir = '/'.join(args.resume.split('/')[:-1])
 
     device = torch.device(args.device)
 
@@ -240,28 +252,14 @@ def main(args):
         # train
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        # i=0
-        # for name, param in model.named_parameters():
-        #     i+=1
-        #     if i==9 and param.requires_grad:
-        #         print(name)
-        #         print('before model.params: \n', param.data)
-        #         print('before model.params.grad: \n', param.grad)
-        #         break
+
         train_stats = train_one_epoch(
             model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
             args=args
         )
-        # i=0
-        # for name, param in model.named_parameters():
-        #     i+=1
-        #     if i==9 and param.requires_grad:
-        #         print(name)
-        #         print('after model.params: \n', param.data)
-        #         print('after model.params.grad: \n', param.grad)
-        #         break
+
         if args.output_dir and (epoch % 50 == 0 or epoch + 1 == args.epochs):
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -276,6 +274,7 @@ def main(args):
             with open(os.path.join(args.output_dir, "{}_log_train.txt".format(base)), mode="a", encoding="utf-8") as f:
                 f.write(json.dumps(train_log_stats) + "\n")
         
+
         # validation
         valid_stats = valid_one_epoch(
             model, data_loader_valid, 

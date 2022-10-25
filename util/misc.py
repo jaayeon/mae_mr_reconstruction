@@ -266,11 +266,7 @@ class NativeScalerWithGradNormCount:
                 norm = get_grad_norm_(parameters)
             self._scaler.step(optimizer)
             self._scaler.update()
-            # for param in parameters:
-            #     print('in nativescaler: \n', param)
-            #     break
         else:
-            # print('no update_grad')
             norm = None
         return norm
 

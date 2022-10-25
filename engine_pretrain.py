@@ -52,7 +52,10 @@ def train_one_epoch(model: torch.nn.Module,
         full_samples = data['full'].to(device, non_blocking=True)
         num_low_freqs = data['num_low_freqs'][0].to(device)
 
-        with torch.cuda.amp.autocast():
+        if args.autocast:
+            with torch.cuda.amp.autocast():
+                loss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio, num_low_freqs=num_low_freqs)
+        else: 
             loss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio, num_low_freqs=num_low_freqs)
 
         loss_value = loss.item()
@@ -62,10 +65,8 @@ def train_one_epoch(model: torch.nn.Module,
             sys.exit(1)
 
         loss /= accum_iter
-        loss_scaler(loss, optimizer, parameters=model.parameters(),
+        loss_scaler(loss, optimizer, parameters=model.parameters(),     #clip_grad=1
                     update_grad=(data_iter_step + 1) % accum_iter == 0)
-        # loss.backward()
-        # optimizer.step()
 
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
