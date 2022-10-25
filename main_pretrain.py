@@ -46,7 +46,7 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=200, type=int)
+    parser.add_argument('--epochs', default=100, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
@@ -111,7 +111,7 @@ def get_args_parser():
     parser.add_argument('--detect_anomaly', action='store_true', 
                         help='torch.autograd.set_detect_anomaly(true), but very slow (7~8 times)')
     parser.add_argument('--autocast', action='store_true', 
-                        help='set torch.cuda.amp.autocast(): float32 -> float16. 0.7 faster, but sth cause nan value...')
+                        help='set torch.cuda.amp.autocast(): float32 -> float16. (0.7/N)*(0.5N)=0.35 faster, but sth cause nan value...')
 
     parser.add_argument('--start_epoch', default=1, type=int, metavar='N',
                         help='start epoch')
@@ -151,7 +151,9 @@ def main(args):
     else:
         args.resume = os.path.join(args.output_dir, args.resume)
         args.output_dir = '/'.join(args.resume.split('/')[:-1])
+        base = os.path.basename(args.output_dir)
 
+    print('output dir: {}'.format(args.output_dir))
     device = torch.device(args.device)
 
     # fix the seed for reproducibility

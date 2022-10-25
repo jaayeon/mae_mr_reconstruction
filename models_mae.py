@@ -234,8 +234,12 @@ class MaskedAutoencoderViT(nn.Module):
         x = x + self.decoder_pos_embed
 
         # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x)
+        for i, blk in enumerate(self.decoder_blocks):
+            if i==5:
+                with torch.cuda.amp.autocast(enabled=False):
+                    x=blk(x.float())
+            else:
+                x = blk(x)
         x = self.decoder_norm(x)
 
         # predictor projection

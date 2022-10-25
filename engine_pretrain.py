@@ -112,11 +112,11 @@ def valid_one_epoch(model: torch.nn.Module,
     valid_stats = {k:0 for k in keys}
     vnum = len(data_loader)
 
-    save_folder = os.path.join(args.output_dir, 'valid_epoch{:03d}'.format(epoch))
-    save_concat_folder = os.path.join(save_folder, 'epoch{:03d}_concat'.format(epoch))
-    save_down_folder = os.path.join(save_folder, 'epoch{:03d}_down'.format(epoch))
-    save_pred_folder = os.path.join(save_folder, 'epoch{:03d}_pred'.format(epoch))
-    save_full_folder = os.path.join(save_folder, 'epoch{:03d}_full'.format(epoch))
+    save_folder = os.path.join(args.output_dir, 'valid_epoch{:02d}'.format(epoch))
+    save_concat_folder = os.path.join(save_folder, 'epoch{:02d}_concat'.format(epoch))
+    save_down_folder = os.path.join(save_folder, 'epoch{:02d}_down'.format(epoch))
+    save_pred_folder = os.path.join(save_folder, 'epoch{:02d}_pred'.format(epoch))
+    save_full_folder = os.path.join(save_folder, 'epoch{:02d}_full'.format(epoch))
 
     if not os.path.exists(save_folder):
         os.mkdir(save_folder)
@@ -156,10 +156,10 @@ def valid_one_epoch(model: torch.nn.Module,
             
             #image save
             if i%50==0:
-                imageio.imwrite(os.path.join(save_down_folder, 'ep{:03d}_down_{:03d}.tif'.format(epoch, int(i/50))), samples.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_pred_folder, 'ep{:03d}_pred_{:03d}.tif'.format(epoch, int(i/50))), pred.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_full_folder, 'ep{:03d}_full_{:03d}.tif'.format(epoch, int(i/50))), full.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_concat_folder, 'ep{:03d}_concat_{:03d}.tif'.format(epoch, int(i/50))), torch.cat([samples, pred, full], dim=-1).squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_down_folder, 'ep{:02d}_down_{:03d}.tif'.format(epoch, int(i/50))), samples.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_pred_folder, 'ep{:02d}_pred_{:03d}.tif'.format(epoch, int(i/50))), pred.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_full_folder, 'ep{:02d}_full_{:03d}.tif'.format(epoch, int(i/50))), full.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_concat_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/50))), torch.cat([samples, pred, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats
