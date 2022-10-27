@@ -159,6 +159,7 @@ def main(args):
     # fix the seed for reproducibility
     seed = args.seed + misc.get_rank()
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
     np.random.seed(seed)
 
     cudnn.benchmark = True

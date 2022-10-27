@@ -160,6 +160,11 @@ class MaskedAutoencoderViT(nn.Module):
             # get overall center mask index to preserve
             ids_low_freq = torch.tensor([i+h*j for i in range(start, end) for j in range(start, end)], device=x.device) #[l]
 
+            # only preserve 70% of center in default
+            low_noise = torch.rand(len(ids_low_freq), device=x.device)
+            low_ids_shuffle = torch.argsort(low_noise)
+            ids_low_freq = low_ids_shuffle[:int(len(ids_low_freq)*0.7)]
+
             # concat center index to the front & delete duplicated index
             _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
             for i in range(len(ids_low_freq)):
@@ -232,14 +237,21 @@ class MaskedAutoencoderViT(nn.Module):
 
         # add pos embed
         x = x + self.decoder_pos_embed
+        if not torch.isfinite(x).all():
+            print('anomaly detected d1')
 
         # apply Transformer blocks
         for i, blk in enumerate(self.decoder_blocks):
-            if i==5:
+            if i > 5:
                 with torch.cuda.amp.autocast(enabled=False):
                     x=blk(x.float())
             else:
                 x = blk(x)
+            if not torch.isfinite(x).all():
+                print('anomaly detected in after {}th block'.format(i))
+
+        if not torch.isfinite(x).all():
+            print('anomaly detected d2')
         x = self.decoder_norm(x)
 
         # predictor projection
