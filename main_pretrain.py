@@ -67,7 +67,7 @@ def get_args_parser():
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
     parser.set_defaults(norm_pix_loss=False)
-    parser.add_argument('--ssl_loss', action='store_true',
+    parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
     
@@ -165,16 +165,6 @@ def main(args):
     cudnn.benchmark = True
 
     # dataset
-    '''
-    # simple augmentation
-    transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(args.input_size, scale=(0.2, 1.0), interpolation=3),  # 3 is bicubic
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
-    dataset_train = datasets.ImageFolder(os.path.join(args.data_path, 'train'), transform=transform_train)
-    print(dataset_train)
-    '''
     dataset = IXIDataset(args, mode='train')
 
     tnum = int(len(dataset)*0.95)
@@ -214,8 +204,9 @@ def main(args):
         drop_last=False
     )
     # define the model
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl_loss=args.ssl_loss, 
-                                            ssl_weight=args.ssl_weight, no_center_mask=args.no_center_mask)
+    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+                                            no_center_mask=args.no_center_mask, 
+                                            num_low_freqs=dataset.num_low_freqs)
 
     model.to(device)
 
@@ -295,7 +286,6 @@ def main(args):
 
         with open(os.path.join(args.output_dir, "{}_log_valid.txt".format(base)), mode="a", encoding="utf-8") as f:
             f.write(json.dumps(valid_log_stats)+"\n")
-        model.train=True
 
 
     total_time = time.time() - start_time

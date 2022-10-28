@@ -26,7 +26,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl_loss=False, ssl_weight=1, no_center_mask=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -57,14 +57,18 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
+
+        self.predictor = nn.Sequential(nn.Linear(patch_size**2*in_chans, 128, bias=True),
+                                        nn.GELU(),
+                                        nn.Linear(128, patch_size**2*in_chans))
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
-        self.ssl_loss = ssl_loss
-        self.ssl_weight = ssl_weight
+        self.ssl = ssl
         self.no_center_mask = no_center_mask
         self.train = True
         self.img_size = img_size
+        self.num_low_freqs = num_low_freqs
 
         self.initialize_weights()
 
@@ -128,7 +132,7 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
         return imgs
 
-    def random_masking(self, x, mask_ratio, num_low_freqs):
+    def random_masking(self, x, mask_ratio, given_ids_shuffle=None):
         """
         Perform per-sample random masking by per-sample shuffling.
         Per-sample shuffling is done by argsort random noise.
@@ -148,30 +152,54 @@ class MaskedAutoencoderViT(nn.Module):
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
         
-        # sort noise for each sample
-        ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
 
-        if self.no_center_mask:
-            # get center mask start index & ending index
-            h=torch.sqrt(torch.tensor(L)) #same as w
-            start = int(torch.round((self.img_size-num_low_freqs)/2/self.img_size*h))
-            end = int(torch.round((self.img_size+num_low_freqs)/2/self.img_size*h))
+        if given_ids_shuffle is not None:
+            ids_shuffle = given_ids_shuffle
+            flip_ids_shuffle = None
+        else:
+            # sort noise for each sample
+            ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
 
-            # get overall center mask index to preserve
-            ids_low_freq = torch.tensor([i+h*j for i in range(start, end) for j in range(start, end)], device=x.device) #[l]
+            if self.no_center_mask:
+                # get center mask start index & ending index
+                h=torch.sqrt(torch.tensor(L)) #same as w
+                start = int(torch.round((self.img_size-self.num_low_freqs)/2/self.img_size*h))
+                end = int(torch.round((self.img_size+self.num_low_freqs)/2/self.img_size*h))
 
-            # only preserve 70% of center in default
-            low_noise = torch.rand(len(ids_low_freq), device=x.device)
-            low_ids_shuffle = torch.argsort(low_noise)
-            ids_low_freq = low_ids_shuffle[:int(len(ids_low_freq)*0.7)]
+                # get overall center mask index to preserve
+                ids_low_freq = torch.tensor([i+h*j for i in range(start, end) for j in range(start, end)], device=x.device) #[l]
+                # order randomization
+                low_noise = torch.rand(len(ids_low_freq), device=x.device)
+                low_ids_shuffle = torch.argsort(low_noise)
+                ids_low_freq = torch.gather(ids_low_freq, dim=0, index=low_ids_shuffle)
+                # only preserve 80% of center in default
+                len_low_keep = int(len(ids_low_freq)*0.8)
+                ids_low_keep = ids_low_freq[:len_low_keep]
 
-            # concat center index to the front & delete duplicated index
-            _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
-            for i in range(len(ids_low_freq)):
-                _ids_shuffle = _ids_shuffle==(ids_shuffle!=ids_low_freq[i]) # True : not included in ids_low_freq
-            _ids_shuffle=_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1) # get True index (N,L-l)
-            _ids_shuffle = torch.gather(ids_shuffle, dim=1, index=_ids_shuffle) # get elements not included in ids_low_freq
-            ids_shuffle = torch.cat([ids_low_freq.repeat(N,1), _ids_shuffle], dim=1).type(torch.int64)
+                # concat center index to the front & delete duplicated index
+                _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
+                for i in range(len(ids_low_keep)):
+                    _ids_shuffle = _ids_shuffle==(ids_shuffle!=ids_low_keep[i]) # True : not included in ids_low_keep, accumulate the False 
+                _ids_shuffle=_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1) # get True index (N,L-l)
+                _ids_shuffle = torch.gather(ids_shuffle, dim=1, index=_ids_shuffle) # get elements not included in ids_low_keep
+                ids_shuffle = torch.cat([ids_low_keep.repeat(N,1), _ids_shuffle], dim=1).type(torch.int64)
+
+
+                #make pair
+                flip_ids_shuffle = torch.flip(ids_shuffle, dims=[1])
+                low_noise = torch.rand(len(ids_low_freq), device=x.device)
+                low_ids_shuffle = torch.argsort(low_noise)
+                ids_low_freq = torch.gather(ids_low_freq, dim=0, index=low_ids_shuffle)
+                new_ids_low_keep = ids_low_freq[:len_low_keep]
+
+                _flip_ids_shuffle = torch.ones(flip_ids_shuffle.shape, device=x.device)
+                for i in range(len_low_keep):
+                    _flip_ids_shuffle = _flip_ids_shuffle==(flip_ids_shuffle!=new_ids_low_keep[i])
+                _flip_ids_shuffle=_flip_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1)
+                _flip_ids_shuffle = torch.gather(flip_ids_shuffle, dim=1, index=_flip_ids_shuffle)
+                flip_ids_shuffle = torch.cat([new_ids_low_keep.repeat(N,1), _flip_ids_shuffle], dim=1).type(torch.int64)
+        
+
 
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
@@ -185,28 +213,17 @@ class MaskedAutoencoderViT(nn.Module):
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore) #(N,L)
 
-        return x_masked, mask, ids_restore
+        return x_masked, mask, ids_restore, flip_ids_shuffle
 
-    def forward_encoder(self, x, mask_ratio, num_low_freqs):
-
-        #double the image num for ssl loss
-        if self.ssl_loss :
-            x = torch.cat((x,x),0) #N,C,H,W -> 2*N,C,H,W (batch index=[0,1,2,3,...,N-1,0,1,2,3,...,N-1])
-            '''
-            index_ = torch.cat((torch.arange(0,x.shape[0]), torch.arange(0,x.shape[0]))) 
-            _, index_ = torch.sort(index_) #0, N, 1, N+1, 2, N+2, ...
-            x = torch.gather(x, dim=0, index=index_.view(-1,1,1,1).repeat(1,1,x.shape[-2],x.shape[-1])) #[0,1,2,...,N-1,0,1,2,3,...,N-1] -> [0,0,1,1,2,2,...,N-1,N-1]
-            '''
-
+    def forward_encoder(self, x, mask_ratio, given_ids_shuffle=None):
         # embed patches
         x = self.patch_embed(x)
 
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
 
-        if self.train:
-            # masking: length -> length * mask_ratio
-            x, mask, ids_restore = self.random_masking(x, mask_ratio, num_low_freqs)
+        # masking: length -> length * mask_ratio
+        x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, given_ids_shuffle=given_ids_shuffle)
 
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -218,22 +235,19 @@ class MaskedAutoencoderViT(nn.Module):
             x = blk(x)
         x = self.norm(x)
 
-        if self.train:
-            return x, mask, ids_restore
-        else:
-            return x, None, None
+        return x, mask, ids_restore, pair_ids
+
 
 
     def forward_decoder(self, x, ids_restore):
         # embed tokens
         x = self.decoder_embed(x)
 
-        if self.train:
-            # append mask tokens to sequence
-            mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
-            x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-            x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle -> to add positional embed
-            x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        # append mask tokens to sequence
+        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
+        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle -> to add positional embed
+        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
 
         # add pos embed
         x = x + self.decoder_pos_embed
@@ -262,7 +276,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_loss(self, imgs, pred, mask, ssl_masks):
+    def forward_loss(self, imgs, pred, mask, sp_masks):
         """
         imgs: [N, 2, H, W]
         pred: [N, L, p*p*2]
@@ -271,14 +285,9 @@ class MaskedAutoencoderViT(nn.Module):
         sp_masks: [N, 1, H, W] 0 is remove, 1 is keep
         """
         N,L,_=pred.shape
-        if self.ssl_loss:
-            imgs = torch.cat((imgs,imgs),0)
-            ssl_masks = torch.cat((ssl_masks, ssl_masks),0)
 
-        sp_masks = torch.zeros(ssl_masks.shape, device=imgs.device)
-        sp_masks[ssl_masks==0]=1
+        #sp_masks = 1-ssl_masks
 
-        ssl_masks = self.patchify(ssl_masks)
         sp_masks = self.patchify(sp_masks)
 
         target = self.patchify(imgs)
@@ -296,43 +305,55 @@ class MaskedAutoencoderViT(nn.Module):
         loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         # loss = loss.sum() / N # mean loss on every patches
 
-        # if not torch.isfinite(loss):
-        #     print("sploss is {}, stopping training".format(loss))
-
-        if self.ssl_loss:
-            sslloss = self.get_ssl_loss(pred, ssl_masks)
-            loss = loss+self.ssl_weight*sslloss
-            # if not torch.isfinite(sslloss):
-            #     print('sslloss is {}, stopping training'.format(sslloss))
         return loss
-    
-    def get_ssl_loss(self, pred, ssl_masks):
-        #self-supervised loss for missing ground-truth pixels
-        #to maximize the same semantic information of each input with different mask augmentations
-        N,L,_ = pred.shape
-        sslloss=0
-        for i in range(int(N/2)):
-            pred1 = pred[i,:,:]
-            pred2 = pred[i+int(N/2),:,:]
-            mask = ssl_masks[i,:,:]
-            # loss = (pred1-pred2)**2
-            loss = torch.abs(pred1-pred2)
 
-            loss = (loss*mask).sum()/N/L*2
-            # loss = loss.sum() #mean loss on every piexles
+    def forward_ssl_loss(self, pred1, pred2, mask1, mask2, ssl_masks):
+        ssl_masks = self.patchify(ssl_masks)
 
-            sslloss+=loss
+        sslloss = torch.abs(pred1-pred2)
+        sslloss = sslloss*ssl_masks
+        sslloss = sslloss.mean(dim=-1)
+        cmask = mask1*mask2
+        sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
+
         return sslloss
 
-    def forward(self, imgs, ssl_masks, mask_ratio=0.75, num_low_freqs=None):
-        latent, mask, ids_restore = self.forward_encoder(imgs, mask_ratio, num_low_freqs)
-        pred = self.forward_decoder(latent, ids_restore)  # [N, L, p*p*3]
-        if self.train:
-            loss = self.forward_loss(imgs, pred, mask, ssl_masks) #mask: 0 is keep, 1 is remove
-            return loss, pred, mask
-        else: 
-            loss = None
-            return loss, self.unpatchify(pred), mask
+
+    def forward(self, imgs, ssl_masks, mask_ratio=0.75):
+
+        latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
+        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+        ppred1 = self.predictor(pred1)
+
+        if self.train and self.ssl: #for train w/ ssl
+            imgs2 = imgs.clone()
+            latent2, mask2, ids_restore2, _ = self.forward_encoder(imgs2, mask_ratio)
+            pred2 = self.forward_decoder(latent2, ids_restore2)
+            ppred2 = self.predictor(pred2)
+        elif not self.train and self.ssl: #for test, use pair ids
+            imgs2 = imgs.clone()
+            latent2, mask2, ids_restore2, _ = self.forward_encoder(imgs2, mask_ratio, given_ids_shuffle=pair_ids)
+            pred2 = self.forward_decoder(latent2, ids_restore2)
+            ppred2 = self.predictor(pred2)
+        else: #no ssl
+            pass
+
+        if self.train and self.ssl:
+            loss1 = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
+            loss2 = self.forward_loss(imgs, pred2, mask2, 1-ssl_masks) #mask: 0 is keep, 1 is remove
+            sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
+            sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
+            return loss1+loss2, sslloss1+sslloss2, pred1, mask1
+        elif self.train and not self.ssl:
+            loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
+            return loss, 0, pred1, mask1
+        else: #not train
+            # 0 is keep, 1 is remove
+            mask1 = mask1.unsqueeze(-1).repeat(1,1,pred1.shape[-1])
+            pred = pred1*mask1 + pred2*(1-mask1)
+
+            return None, None, self.unpatchify(pred), mask1
+
 
 
 def mae_vit_base_patch16_uniform_dec768d12b(**kwargs):

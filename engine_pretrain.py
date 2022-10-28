@@ -29,7 +29,7 @@ def train_one_epoch(model: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler,
                     log_writer=None,
                     args=None):
-    # model.train()
+    model.train=True
     metric_logger = misc.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', misc.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
@@ -51,14 +51,14 @@ def train_one_epoch(model: torch.nn.Module,
         samples = data['down'].to(device, non_blocking=True)
         ssl_masks = data['mask'].to(device, non_blocking=True)
         full_samples = data['full'].to(device, non_blocking=True)
-        num_low_freqs = data['num_low_freqs'][0].to(device)
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                loss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio, num_low_freqs=num_low_freqs)
+                sploss, sslloss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
         else: 
-            loss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio, num_low_freqs=num_low_freqs)
+            sploss, sslloss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
 
+        loss = sploss + args.ssl_weight*sslloss
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -75,17 +75,24 @@ def train_one_epoch(model: torch.nn.Module,
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
+        metric_logger.update(sploss=sploss.item())
+        metric_logger.update(sslloss=sslloss.item())
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
         loss_value_reduce = misc.all_reduce_mean(loss_value)
+        sploss_value_reduce = misc.all_reduce_mean(sploss.item())
+        sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
             """
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_sploss', sploss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_sslloss', sslloss_value_reduce, epoch_1000x)
+
             log_writer.add_scalar('lr', lr, epoch_1000x)
         # i=0
         # for name, param in model.named_parameters():
@@ -108,7 +115,7 @@ def valid_one_epoch(model: torch.nn.Module,
                     args=None):
 
     model.train=False
-    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'noise_ssim', 'ssim', 'noise_nmse', 'nmse']
+    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'psnr_dc', 'noise_ssim', 'ssim', 'ssim_dc', 'noise_nmse', 'nmse']
     valid_stats = {k:0 for k in keys}
     vnum = len(data_loader)
 
@@ -134,34 +141,37 @@ def valid_one_epoch(model: torch.nn.Module,
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            _, pred, _  = model(samples, ssl_masks)
+            _, _, pred, _  = model(samples, ssl_masks)
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)
-            pred = samples + pred*ssl_masks
+            pred_dc = samples + pred*ssl_masks
             
-            samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full_samples[0,:,:,:], permute=True) 
+            samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
             
             #normalization [0-1]
             max = torch.max(samples)
             min = torch.min(samples)
             samples = torch.clamp((samples-min)/(max-min), min=0, max=1)
             pred = torch.clamp((pred-min)/(max-min), min=0, max=1)
+            pred_dc = torch.clamp((pred_dc-min)/(max-min), min=0, max=1)
             full = torch.clamp((full-min)/(max-min), min=0, max=1)
             
             #calculate psnr, ssim
             stat = calc_metrics(samples.unsqueeze(0), pred.unsqueeze(0), full.unsqueeze(0))
+            stat_dc = calc_metrics(samples.unsqueeze(0), pred_dc.unsqueeze(0), full.unsqueeze(0))
             for k,v in stat.items():
                 valid_stats[k]+=v/vnum
+            valid_stats['psnr_dc'] += stat_dc['psnr']/vnum
+            valid_stats['ssim_dc'] += stat_dc['ssim']/vnum
             
             #image save
-            if i%50==0:
-                imageio.imwrite(os.path.join(save_down_folder, 'ep{:02d}_down_{:03d}.tif'.format(epoch, int(i/50))), samples.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_pred_folder, 'ep{:02d}_pred_{:03d}.tif'.format(epoch, int(i/50))), pred.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_full_folder, 'ep{:02d}_full_{:03d}.tif'.format(epoch, int(i/50))), full.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_concat_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/50))), torch.cat([samples, pred, full], dim=-1).squeeze().cpu().numpy())
+            if i%100==0:
+                #imageio.imwrite(os.path.join(save_down_folder, 'ep{:02d}_down_{:03d}.tif'.format(epoch, int(i/100))), samples.squeeze().cpu().numpy())
+                #imageio.imwrite(os.path.join(save_pred_folder, 'ep{:02d}_pred_{:03d}.tif'.format(epoch, int(i/100))), pred.squeeze().cpu().numpy())
+                #imageio.imwrite(os.path.join(save_full_folder, 'ep{:02d}_full_{:03d}.tif'.format(epoch, int(i/100))), full.squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_concat_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/100))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats
-
 
