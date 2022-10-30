@@ -302,12 +302,13 @@ class MaskedAutoencoderViT(nn.Module):
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         # loss = (loss * mask).sum() / N  # mean loss on removed patches
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        # loss = loss.sum() / N # mean loss on every patches
+        # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        loss = loss.sum() / N # mean loss on every patches
 
         return loss
 
     def forward_ssl_loss(self, pred1, pred2, mask1, mask2, ssl_masks):
+        N,L,_ = pred1.shape
         ssl_masks = self.patchify(ssl_masks)
 
         sslloss = torch.abs(pred1-pred2)
@@ -315,6 +316,7 @@ class MaskedAutoencoderViT(nn.Module):
         sslloss = sslloss.mean(dim=-1)
         cmask = mask1*mask2
         sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
+        sslloss = sslloss.sum()/N
 
         return sslloss
 
