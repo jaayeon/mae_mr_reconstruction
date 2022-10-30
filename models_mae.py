@@ -315,7 +315,7 @@ class MaskedAutoencoderViT(nn.Module):
         sslloss = sslloss*ssl_masks
         sslloss = sslloss.mean(dim=-1)
         cmask = mask1*mask2
-        sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
+        # sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
         sslloss = sslloss.sum()/N
 
         return sslloss
