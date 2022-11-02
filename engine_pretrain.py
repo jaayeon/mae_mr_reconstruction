@@ -54,9 +54,18 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, sslloss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
+                sploss, sslloss, pred, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
         else: 
-            sploss, sslloss, _, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
+            sploss, sslloss, pred, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
+
+
+        """ # spatial domain loss
+        samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
+        
+        
+        
+        
+        """
 
         loss = sploss + args.ssl_weight*sslloss
         loss_value = loss.item()

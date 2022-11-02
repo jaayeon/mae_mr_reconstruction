@@ -94,3 +94,16 @@ def interpolate_pos_embed(model, checkpoint_model):
             pos_tokens = pos_tokens.permute(0, 2, 3, 1).flatten(1, 2)
             new_pos_embed = torch.cat((extra_tokens, pos_tokens), dim=1)
             checkpoint_model['pos_embed'] = new_pos_embed
+
+
+def focal_gaussian(kernlen=256, std=20):
+       
+    def gaussian(m, std):
+        n = torch.arange(0,m)-(m-1.0)/2.0
+        sig2 = 2*std*std
+        w = torch.exp(-n**2/sig2)
+        return w
+    
+    gkern1d = gaussian(kernlen, std)
+    gkern2d = 10-10*torch.outer(gkern1d, gkern1d)+1e-02
+    return gkern2d

@@ -65,9 +65,9 @@ class IXIDataset(Dataset):
         return arr
     
 
-    def scale(self, arr): #[-1~1] for kspace
+    def scale(self, arr): #[-6~6] for kspace
         absmax = torch.max(torch.abs(arr))
-        arr = arr/absmax
+        arr = arr/absmax*6
         return arr
 
 
@@ -76,8 +76,8 @@ class IXIDataset(Dataset):
         #mask: 0 is remove, 1 is keep -> shuffle to 0 is keep, 1 is remove
         #mask_ = torch.zeros(mask.shape, device=mask.device)
         #mask_[mask==0]=1
-        mask_ = 1-mask
         if mask is not None:
+            mask_ = 1-mask
             ssl_mask_2d=torch.ones(c,h,w)*mask_
         else:
             ssl_mask_2d = torch.zeros(c,h,w)

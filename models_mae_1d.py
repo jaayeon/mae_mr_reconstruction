@@ -17,10 +17,10 @@ import torch.nn as nn
 
 from timm.models.vision_transformer import PatchEmbed, Block
 
-from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
+from util.pos_embed import get_2d_sincos_pos_embed
 
 
-class MaskedAutoencoderViT(nn.Module):
+class MaskedAutoencoderViT1d(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
@@ -345,23 +345,21 @@ class MaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, 1-ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
+            return loss1+loss2, sslloss1+sslloss2, pred1, mask1
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
-            return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
-        elif not self.train and self.ssl: #not train
+            return loss, 0, pred1, mask1
+        else: #not train
             # 0 is keep, 1 is remove
             mask1 = mask1.unsqueeze(-1).repeat(1,1,pred1.shape[-1])
             pred = pred1*mask1 + pred2*(1-mask1)
 
             return None, None, self.unpatchify(pred), mask1
-        else: #not train, not ssl
-            return None, None, self.unpatchify(pred1), mask1
 
 
 
 def mae_vit_base_patch16_uniform_dec768d12b(**kwargs):
-    model = MaskedAutoencoderViT(
+    model = MaskedAutoencoderViT1d(
         patch_size=16, in_chans=2, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=768, decoder_depth=12, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
@@ -369,7 +367,7 @@ def mae_vit_base_patch16_uniform_dec768d12b(**kwargs):
 
 
 def mae_vit_base_patch16_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT(
+    model = MaskedAutoencoderViT1d(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
@@ -377,7 +375,7 @@ def mae_vit_base_patch16_dec512d8b(**kwargs):
 
 
 def mae_vit_large_patch16_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT(
+    model = MaskedAutoencoderViT1d(
         patch_size=16, embed_dim=1024, depth=24, num_heads=16,
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
@@ -385,7 +383,7 @@ def mae_vit_large_patch16_dec512d8b(**kwargs):
 
 
 def mae_vit_huge_patch14_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT(
+    model = MaskedAutoencoderViT1d(
         patch_size=14, embed_dim=1280, depth=32, num_heads=16,
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
