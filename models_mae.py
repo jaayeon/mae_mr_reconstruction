@@ -9,6 +9,7 @@
 # DeiT: https://github.com/facebookresearch/deit
 # --------------------------------------------------------
 
+from cgi import print_arguments
 from functools import partial
 
 import math
@@ -159,6 +160,7 @@ class MaskedAutoencoderViT(nn.Module):
         else:
             # sort noise for each sample
             ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
+            flip_ids_shuffle=None
 
             if self.no_center_mask:
                 # get center mask start index & ending index
@@ -223,7 +225,12 @@ class MaskedAutoencoderViT(nn.Module):
         x = x + self.pos_embed[:, 1:, :]
 
         # masking: length -> length * mask_ratio
-        x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, given_ids_shuffle=given_ids_shuffle)
+        if self.train:
+            x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, given_ids_shuffle=given_ids_shuffle)
+        else:
+            mask = None
+            ids_restore = None
+            pair_ids = None
 
         # append cls token
         cls_token = self.cls_token + self.pos_embed[:, :1, :]
@@ -243,11 +250,12 @@ class MaskedAutoencoderViT(nn.Module):
         # embed tokens
         x = self.decoder_embed(x)
 
-        # append mask tokens to sequence
-        mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
-        x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
-        x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle -> to add positional embed
-        x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
+        if self.train:
+            # append mask tokens to sequence
+            mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
+            x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
+            x_ = torch.gather(x_, dim=1, index=ids_restore.unsqueeze(-1).repeat(1, 1, x.shape[2]))  # unshuffle -> to add positional embed
+            x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
 
         # add pos embed
         x = x + self.decoder_pos_embed
@@ -332,11 +340,13 @@ class MaskedAutoencoderViT(nn.Module):
             latent2, mask2, ids_restore2, _ = self.forward_encoder(imgs2, mask_ratio)
             pred2 = self.forward_decoder(latent2, ids_restore2)
             ppred2 = self.predictor(pred2)
-        elif not self.train and self.ssl: #for test, use pair ids
+                
+            '''elif not self.train and self.ssl: #for test, use pair ids
             imgs2 = imgs.clone()
             latent2, mask2, ids_restore2, _ = self.forward_encoder(imgs2, mask_ratio, given_ids_shuffle=pair_ids)
             pred2 = self.forward_decoder(latent2, ids_restore2)
             ppred2 = self.predictor(pred2)
+            '''
         else: #no ssl
             pass
 
@@ -349,12 +359,13 @@ class MaskedAutoencoderViT(nn.Module):
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
             return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
-        elif not self.train and self.ssl: #not train
+            """ elif not self.train and self.ssl: #not train, ssl
             # 0 is keep, 1 is remove
             mask1 = mask1.unsqueeze(-1).repeat(1,1,pred1.shape[-1])
             pred = pred1*mask1 + pred2*(1-mask1)
 
-            return None, None, self.unpatchify(pred), mask1
+            return None, None, self.unpatchify(pred), mask1 
+            """
         else: #not train, not ssl
             return None, None, self.unpatchify(pred1), mask1
 

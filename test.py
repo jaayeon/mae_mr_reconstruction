@@ -1,7 +1,11 @@
+from email.mime import image
+from random import sample
 import torch
 import os
 import argparse
 import numpy as np
+import imageio
+from pathlib import Path
 
 from data.ixidata import IXIDataset
 from util.mri_tools import rifft2
@@ -12,7 +16,7 @@ from torch.utils.tensorboard import SummaryWriter
 import models_mae
 import util.misc as misc
 
-def get_args_parse():
+def get_args_parser():
     parser = argparse.ArgumentParser('MAE test', add_help=False)
     # Model parameters
     parser.add_argument('--model', default='mae_vit_base_patch16_uniform', type=str, metavar='MODEL',
@@ -30,7 +34,7 @@ def get_args_parse():
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
     parser.set_defaults(norm_pix_loss=False)
-    parser.add_argument('--ssl_loss', action='store_true',
+    parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
     
@@ -58,6 +62,13 @@ def get_args_parse():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
+    parser.add_argument('--save_num', default=0, type=int, help='0 is saving all images, otherwise saving only that number of images')
+
+    # distributed training parameters
+    parser.add_argument('--world_size', default=1, type=int,
+                        help='number of distributed processes')
+    parser.add_argument('--local_rank', default=-1, type=int)
+    parser.add_argument('--dist_on_itp', action='store_true')
 
     return parser
 
@@ -91,8 +102,8 @@ def main(args):
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
 
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl_loss=args.ssl_loss, 
-                                            ssl_weight=args.ssl_weight, no_center_mask=args.no_center_mask)
+    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+                                            no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
 
     model.to(device)
 
@@ -101,9 +112,9 @@ def main(args):
     print('Start test.. best epoch: {}'.format(checkpoint['epoch']))
 
     model.train=False
-    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'noise_ssim', 'ssim', 'noise_nmse', 'nmse']
+    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'psnr_dc', 'noise_ssim', 'ssim', 'ssim_dc', 'noise_nmse', 'nmse']
     test_stats = {k:0 for k in keys}
-    tnum = len(data_loader)
+    tnum = len(data_loader) if len(data_loader)<args.save_num else args.save_num
 
     save_folder = os.path.join(args.output_dir, 'test')
     save_concat = os.path.join(save_folder, 'test_concat')
@@ -128,9 +139,46 @@ def main(args):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            _, pred, _  = model(samples, ssl_masks, coverall=True)
+            _, _, pred, _  = model(samples, ssl_masks)
 
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)
-            pred = samples + pred*ssl_masks
+            pred_dc = samples + pred*ssl_masks
+
+            isamples, ipred, ipred_dc, ifull = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True)
+
+            concat_kspace = torch.cat([samples[:,0,:,:], pred[:,0,:,:], pred_dc[:,0,:,:], full_samples[:,0,:,:]], dim=-1).squeeze(0)
+            #normalization [0-1]
+            max = torch.max(isamples)
+            min = torch.min(isamples)
+            isamples = torch.clamp((isamples-min)/(max-min), min=0, max=1)
+            ipred = torch.clamp((ipred-min)/(max-min), min=0, max=1)
+            ipred_dc = torch.clamp((ipred_dc-min)/(max-min), min=0, max=1)
+            ifull = torch.clamp((ifull-min)/(max-min), min=0, max=1)
+
+            #calculate psnr, ssim
+            stat = calc_metrics(isamples.unsqueeze(0), ipred.unsqueeze(0), ifull.unsqueeze(0))
+            stat_dc = calc_metrics(isamples.unsqueeze(0), ipred_dc.unsqueeze(0), ifull.unsqueeze(0))
+            for k,v in stat.items():
+                test_stats[k]+=v/tnum
+            test_stats['psnr_dc'] += stat_dc['psnr']/tnum
+            test_stats['ssim_dc'] += stat_dc['ssim']/tnum
+
+            imageio.imwrite(os.path.join(save_concat_kspace, 'concat_kspace_{:03d}.tif'.format(int(i))), concat_kspace.cpu().numpy())
+            imageio.imwrite(os.path.join(save_pred_dc, 'preddc_{:03d}.tif'.format(int(i))), ipred_dc.squeeze().cpu().numpy())
+            imageio.imwrite(os.path.join(save_pred, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
+            imageio.imwrite(os.path.join(save_concat, 'concat_{:03d}.tif'.format(int(i))), torch.cat([isamples, ipred, ipred_dc, ifull], dim=-1).squeeze().cpu().numpy())
+
+            if args.save_num==i-1:
+                break
+
+    print('Test: {}'.format(', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in test_stats.items()])))
+
+
+if __name__ == '__main__':
+    args = get_args_parser()
+    args = args.parse_args()
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    main(args)

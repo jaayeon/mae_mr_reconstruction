@@ -70,7 +70,7 @@ def get_args_parser():
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
-    parser.add_argument('--divide_loss', action='store_true', 
+    parser.add_argument('--divided_loss', action='store_true', 
                         help='to maximize the entropy, to balance the energy, divide exponential term to each pixel loss')
     # Optimizer parameters
     parser.add_argument('--weight_decay', type=float, default=0.05,
