@@ -27,7 +27,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None, divide_loss=False):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -70,6 +70,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.train = True
         self.img_size = img_size
         self.num_low_freqs = num_low_freqs
+        self.divide_loss = focal_gaussian() if divide_loss else None
 
         self.initialize_weights()
 
@@ -272,6 +273,8 @@ class MaskedAutoencoderViT(nn.Module):
             if not torch.isfinite(x).all():
                 print('anomaly detected in after {}th block'.format(i))
 
+        
+
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
         x = self.decoder_norm(x)
@@ -307,6 +310,9 @@ class MaskedAutoencoderViT(nn.Module):
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
         loss = loss*sp_masks
+        if self.divide_loss is not None:
+            divide_loss = self.patchify(self.divide_loss)
+            loss = loss*divide_loss.to(loss.device)
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         # loss = (loss * mask).sum() / N  # mean loss on removed patches
@@ -321,8 +327,11 @@ class MaskedAutoencoderViT(nn.Module):
 
         sslloss = torch.abs(pred1-pred2)
         sslloss = sslloss*ssl_masks
+        if self.divide_loss is not None:
+            divide_loss = self.patchify(self.divide_loss)
+            sslloss = sslloss*divide_loss.to(sslloss.device)
         sslloss = sslloss.mean(dim=-1)
-        cmask = mask1*mask2
+        # cmask = mask1*mask2
         # sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
         sslloss = sslloss.sum()/N
 

@@ -207,7 +207,8 @@ def main(args):
     # define the model
     model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             no_center_mask=args.no_center_mask, 
-                                            num_low_freqs=dataset.num_low_freqs)
+                                            num_low_freqs=dataset.num_low_freqs,
+                                            divide_loss=args.divide_loss)
 
     model.to(device)
 
@@ -230,11 +231,12 @@ def main(args):
         model_without_ddp = model.module
     
     # following timm: set wd as 0 for bias and norm layers
-    param_groups = optim_factory.param_groups_weight_decay(model_without_ddp, weight_decay=args.weight_decay) #add_weight_decay -> param_groups_weight_decay
+    #param_groups = optim_factory.param_groups_weight_decay(model_without_ddp, weight_decay=args.weight_decay) #add_weight_decay -> param_groups_weight_decay
     # return of param_groups_weight_decay: 
     # [{'params': no_decay, 'weight_decay': 0.},
     # {'params': decay, 'weight_decay': weight_decay}]
-    optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
+    #optimizer = torch.optim.AdamW(param_groups, lr=args.lr, betas=(0.9, 0.95))
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-8)
     print(optimizer)
     loss_scaler = NativeScaler()
     best_psnr = 0.0
