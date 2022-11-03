@@ -287,7 +287,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_loss(self, imgs, pred, mask, sp_masks):
+    def forward_loss(self, imgs, pred, mask, sp_masks, full=None):
         """
         imgs: [N, 2, H, W]
         pred: [N, L, p*p*2]
@@ -300,8 +300,10 @@ class MaskedAutoencoderViT(nn.Module):
         #sp_masks = 1-ssl_masks
 
         sp_masks = self.patchify(sp_masks)
-
-        target = self.patchify(imgs)
+        if full is not None:
+            target = self.patchify(full)
+        else:
+            target = self.patchify(imgs)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
@@ -338,7 +340,7 @@ class MaskedAutoencoderViT(nn.Module):
         return sslloss
 
 
-    def forward(self, imgs, ssl_masks, mask_ratio=0.75):
+    def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
 
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
@@ -366,7 +368,7 @@ class MaskedAutoencoderViT(nn.Module):
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
             return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
         elif self.train and not self.ssl:
-            loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
+            loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
             """ elif not self.train and self.ssl: #not train, ssl
             # 0 is keep, 1 is remove

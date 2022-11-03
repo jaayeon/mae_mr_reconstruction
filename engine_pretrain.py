@@ -173,7 +173,7 @@ def valid_one_epoch(model: torch.nn.Module,
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)
-            ssl_masks = smasks.to(pred.device)
+            #ssl_masks = smasks.to(pred.device)
             pred_dc = samples + pred*ssl_masks
             
             samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
