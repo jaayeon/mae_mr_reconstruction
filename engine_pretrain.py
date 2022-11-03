@@ -14,6 +14,7 @@ import os
 from turtle import down
 from typing import Iterable
 import imageio
+import numpy as np
 
 import torch
 
@@ -54,9 +55,9 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, sslloss, pred, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
+                sploss, sslloss, pred, _ = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
         else: 
-            sploss, sslloss, pred, _ = model(samples, ssl_masks, mask_ratio=args.mask_ratio)
+            sploss, sslloss, pred, _ = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
 
         """ # spatial domain loss
@@ -145,15 +146,34 @@ def valid_one_epoch(model: torch.nn.Module,
     if not os.path.exists(save_full_folder):
         os.mkdir(save_full_folder)
 
+    num_low_freqs = 44
+    num_high_freqs = 20
+    h=256
+    center_mask = np.zeros(256, dtype=np.float32)
+    pad = (256 - num_low_freqs + 1) // 2
+    center_mask[pad : pad+num_low_freqs]=1
+    assert center_mask.sum() == num_low_freqs
+    center_mask = torch.tensor(center_mask).view(1,-1,1)
+    
+    adjusted_accel = int((h-num_low_freqs)/(num_high_freqs))
+    accel_mask = np.zeros(h, dtype=np.float32)
+    accel_mask[0::adjusted_accel]=1
+    accel_mask = torch.tensor(accel_mask).view(1,-1,1)
+    mask = torch.max(center_mask, accel_mask)
+    mask = 1-mask
+    smasks = torch.ones(2,256,256)*mask
+
+
     with torch.no_grad():
         for i, data in enumerate(data_loader):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            _, _, pred, _  = model(samples, ssl_masks)
+            _, _, pred, _  = model(samples, ssl_masks, full_samples)
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)
+            ssl_masks = smasks.to(pred.device)
             pred_dc = samples + pred*ssl_masks
             
             samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
