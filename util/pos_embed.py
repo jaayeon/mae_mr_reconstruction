@@ -105,7 +105,7 @@ def focal_gaussian(kernlen=256, std=20):
         return w
     
     gkern1d = gaussian(kernlen, std)
-    gkern2d = 10-10*torch.outer(gkern1d, gkern1d)+1e-01
+    gkern2d = 10-10*torch.outer(gkern1d, gkern1d)+1e-02
     gkern2d = gkern2d.view(1,1,kernlen, kernlen)
     gkern2d = torch.cat([gkern2d, gkern2d], dim=1)
     return gkern2d

@@ -13,6 +13,7 @@ from util.metric import calc_metrics
 
 from torch.utils.tensorboard import SummaryWriter
 
+import models_mae_1d
 import models_mae
 import util.misc as misc
 
@@ -102,8 +103,12 @@ def main(args):
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
 
-    model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                            no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
+    if '1d' not in args.model:
+        model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+                                                no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
+    else:
+        model = models_mae_1d.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+                                                no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
 
     model.to(device)
 
