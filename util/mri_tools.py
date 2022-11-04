@@ -51,13 +51,23 @@ def ifft2(data):
 
 
 def permuteforward(data): #[c,h,w] -> [h,w,c]
-    assert data.shape[0] in [1,2]
-    data = data.permute(1,2,0)
+    assert data.shape[-3] in [1,2]
+    if data.dim()==3:
+        data = data.permute(1,2,0)
+    elif data.dim()==4:
+        data = data.permute(0,2,3,1)
+    else:
+        raise SyntaxError('tensor dimension should be 3 or 4')
     return data
 
 def permuteback(data): #[h,w,c] -> [c,h,w]
-    assert data.shape[2] in [1,2]
-    data = data.permute(2,0,1)
+    assert data.shape[-1] in [1,2]
+    if data.dim()==3:
+        data = data.permute(2,0,1)
+    elif data.dim()==4:
+        data = data.permute(0,3,1,2)
+    else:
+        raise SyntaxError('tensor dimension should be 3 or 4')
     return data
 
 def rfft2(*data, permute=False):

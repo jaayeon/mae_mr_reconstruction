@@ -61,14 +61,16 @@ def train_one_epoch(model: torch.nn.Module,
 
 
         """ # spatial domain loss
-        samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
-        
-        
-        
-        
+        pred, full = rifft2(pred[:,:,:,:], full_samples[:,:,:,:], permute=True) 
+        maxnum = torch.max(full)
+        minnum = torch.min(full)
+        pred = (pred-minnum)/(maxnum-minnum+1e-08)
+        full = (full-minnum)/(maxnum-minnum+1e-08)
+        sptloss = torch.sum(abs(pred-full))/samples.shape[0]      
         """
+        sptloss = torch.tensor([0], device=sploss.device)
 
-        loss = sploss + args.ssl_weight*sslloss
+        loss = sploss + args.ssl_weight*sslloss + sptloss
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -87,6 +89,7 @@ def train_one_epoch(model: torch.nn.Module,
         metric_logger.update(loss=loss_value)
         metric_logger.update(sploss=sploss.item())
         metric_logger.update(sslloss=sslloss.item())
+        metric_logger.update(spaloss=sptloss.item())
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
@@ -94,6 +97,7 @@ def train_one_epoch(model: torch.nn.Module,
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         sploss_value_reduce = misc.all_reduce_mean(sploss.item())
         sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
+        sptloss_value_reduce = misc.all_reduce_mean(sptloss.item())
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
@@ -102,6 +106,8 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sploss', sploss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sslloss', sslloss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_sptloss', sptloss_value_reduce, epoch_1000x)
+            
 
             log_writer.add_scalar('lr', lr, epoch_1000x)
         # i=0
