@@ -205,16 +205,17 @@ def main(args):
         pin_memory=args.pin_mem, 
         drop_last=False
     )
+    num_low_freqs = 44 if dataset.num_low_freqs>44 else dataset.num_low_freqs
     # define the model
     if '1d' not in args.model:
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             no_center_mask=args.no_center_mask, 
-                                            num_low_freqs=dataset.num_low_freqs,
+                                            num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)
     else:
         model = models_mae_1d.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             no_center_mask=args.no_center_mask, 
-                                            num_low_freqs=dataset.num_low_freqs,
+                                            num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)
 
     model.to(device)
