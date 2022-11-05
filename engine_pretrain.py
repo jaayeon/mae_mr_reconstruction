@@ -166,8 +166,7 @@ def valid_one_epoch(model: torch.nn.Module,
     accel_mask[0::adjusted_accel]=1
     accel_mask = torch.tensor(accel_mask).view(1,-1,1)
     mask = torch.max(center_mask, accel_mask)
-    mask = 1-mask
-    smasks = torch.ones(2,256,256)*mask
+    smasks = torch.ones(2,256,256)*(1-mask)
 
 
     with torch.no_grad():
