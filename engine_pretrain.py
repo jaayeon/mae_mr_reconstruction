@@ -60,17 +60,20 @@ def train_one_epoch(model: torch.nn.Module,
             sploss, sslloss, pred, _ = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
 
-        """ # spatial domain loss
-        pred, full = rifft2(pred[:,:,:,:], full_samples[:,:,:,:], permute=True) 
+        # spatial domain loss
+        if args.downsample>1:
+            pred_dc = samples + pred*ssl_masks
+        else:
+            pred_dc = pred
+        pred_dc, full = rifft2(pred_dc[:,:,:,:], full_samples[:,:,:,:], permute=True) 
         maxnum = torch.max(full)
         minnum = torch.min(full)
-        pred = (pred-minnum)/(maxnum-minnum+1e-08)
+        pred_dc = (pred_dc-minnum)/(maxnum-minnum+1e-08)
         full = (full-minnum)/(maxnum-minnum+1e-08)
-        sptloss = torch.sum(abs(pred-full))/samples.shape[0]      
-        """
-        sptloss = torch.tensor([0], device=sploss.device)
+        imgloss = torch.sum(torch.abs(pred_dc-full))/samples.shape[0]/256      
+        # imgloss = torch.tensor([0], device=sploss.device)
 
-        loss = sploss + args.ssl_weight*sslloss + sptloss
+        loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -89,7 +92,7 @@ def train_one_epoch(model: torch.nn.Module,
         metric_logger.update(loss=loss_value)
         metric_logger.update(sploss=sploss.item())
         metric_logger.update(sslloss=sslloss.item())
-        metric_logger.update(spaloss=sptloss.item())
+        metric_logger.update(imgloss=imgloss.item())
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
@@ -97,7 +100,7 @@ def train_one_epoch(model: torch.nn.Module,
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         sploss_value_reduce = misc.all_reduce_mean(sploss.item())
         sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
-        sptloss_value_reduce = misc.all_reduce_mean(sptloss.item())
+        sptloss_value_reduce = misc.all_reduce_mean(imgloss.item())
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
@@ -175,8 +178,9 @@ def valid_one_epoch(model: torch.nn.Module,
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
 
-            samples = samples*(mask.to(samples.device))
-            ssl_masks = smasks.to(samples.device)
+            if args.downsample < 2:
+                samples = samples*(mask.to(samples.device))
+                ssl_masks = smasks.to(samples.device)
 
             _, _, pred, _  = model(samples, ssl_masks, full_samples)
 

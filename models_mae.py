@@ -264,6 +264,7 @@ class MaskedAutoencoderViT(nn.Module):
             print('anomaly detected d1')
 
         # apply Transformer blocks
+        '''
         for i, blk in enumerate(self.decoder_blocks):
             if i > 5:
                 with torch.cuda.amp.autocast(enabled=False):
@@ -272,7 +273,9 @@ class MaskedAutoencoderViT(nn.Module):
                 x = blk(x)
             if not torch.isfinite(x).all():
                 print('anomaly detected in after {}th block'.format(i))
-
+        '''
+        for blk in self.decoder_blocks:
+            x = blk(x)
         
 
         if not torch.isfinite(x).all():
@@ -297,8 +300,6 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N,L,_=pred.shape
 
-        #sp_masks = 1-ssl_masks
-
         sp_masks = self.patchify(sp_masks)
         if full is not None:
             target = self.patchify(full)
@@ -311,7 +312,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
-        loss = loss*sp_masks
+        if self.ssl: # calculate loss in only acquired data
+            loss = loss*sp_masks
         if self.divide_loss is not None:
             divide_loss = self.patchify(self.divide_loss)
             loss = loss*divide_loss.to(loss.device)
@@ -319,7 +321,10 @@ class MaskedAutoencoderViT(nn.Module):
 
         # loss = (loss * mask).sum() / N  # mean loss on removed patches
         # loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        loss = loss.sum() / N # mean loss on every patches
+        if self.ssl:
+            loss = loss.sum() / mask.sum() # mean loss on every patches
+        else:
+            loss = loss.sum() / N
 
         return loss
 
@@ -341,7 +346,6 @@ class MaskedAutoencoderViT(nn.Module):
 
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
-
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
         ppred1 = self.predictor(pred1)
@@ -382,14 +386,28 @@ class MaskedAutoencoderViT(nn.Module):
 
 
 
-def mae_vit_base_patch16_uniform_dec768d12b(**kwargs):
+def mae_2d_large_12_768(**kwargs):
     model = MaskedAutoencoderViT(
         patch_size=16, in_chans=2, embed_dim=768, depth=12, num_heads=12,
         decoder_embed_dim=768, decoder_depth=12, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
+def mae_2d_base_8_768(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=16, in_chans=2, embed_dim=768, depth=8, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=8, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
 
+def mae_2d_small_4_768(**kwargs):
+    model = MaskedAutoencoderViT(
+        patch_size=16, in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=12,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+'''
 def mae_vit_base_patch16_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
@@ -412,10 +430,12 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
-
+'''
 
 # set recommended archs
-mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_base_patch16_uniform = mae_vit_base_patch16_uniform_dec768d12b #decoder: 768 dim, 12 blocks
+# mae_vit_base_patch16 = mae_vit_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
+# mae_vit_large_patch16 = mae_vit_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
+# mae_vit_huge_patch14 = mae_vit_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
+mae2d_large = mae_2d_large_12_768 #decoder: 768 dim, 12 blocks
+mae2d_base = mae_2d_base_8_768
+mae2d_small = mae_2d_small_4_768

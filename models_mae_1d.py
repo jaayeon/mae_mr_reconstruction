@@ -170,6 +170,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         
         if torch.sum(ssl_masks) != 0:
             removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0]
+            if len_keep+len(removed_index)>L:
+                len_keep = L - len(removed_index)
         else:
             removed_index = None
 
@@ -289,6 +291,7 @@ class MaskedAutoencoderViT1d(nn.Module):
             print('anomaly detected d1')
 
         # apply Transformer blocks
+        '''
         for i, blk in enumerate(self.decoder_blocks):
             if i > 5:
                 with torch.cuda.amp.autocast(enabled=False):
@@ -297,7 +300,9 @@ class MaskedAutoencoderViT1d(nn.Module):
                 x = blk(x)
             if not torch.isfinite(x).all():
                 print('anomaly detected in after {}th block'.format(i))
-
+        '''
+        for blk in self.decoder_blocks:
+            x = blk(x)
         
 
         if not torch.isfinite(x).all():
@@ -325,10 +330,10 @@ class MaskedAutoencoderViT1d(nn.Module):
         #sp_masks = 1-ssl_masks
 
         sp_masks = self.patchify(sp_masks)
-        if full is not None:
-            target = self.patchify(full)
-        else:
+        if self.ssl:
             target = self.patchify(imgs)
+        else:
+            target = self.patchify(full)
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
@@ -336,7 +341,8 @@ class MaskedAutoencoderViT1d(nn.Module):
 
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
-        loss = loss*sp_masks
+        if self.ssl:
+            loss = loss*sp_masks
         if self.divide_loss is not None:
             divide_loss = self.patchify(self.divide_loss)
             loss = loss*divide_loss.to(loss.device)
@@ -409,14 +415,28 @@ class MaskedAutoencoderViT1d(nn.Module):
 
 
 
-def mae_vit_1d_base_patch16_uniform_dec768d12b(**kwargs):
+def mae_1d_large_12_1024(**kwargs):
     model = MaskedAutoencoderViT1d(
-        patch_size=16, in_chans=2, embed_dim=768, depth=12, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=12, decoder_num_heads=16,
+        patch_size=16, in_chans=2, embed_dim=1024, depth=12, num_heads=12,
+        decoder_embed_dim=1024, decoder_depth=12, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
+def mae_1d_base_8_768(**kwargs):
+    model = MaskedAutoencoderViT1d(
+        patch_size=16, in_chans=2, embed_dim=768, depth=8, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=8, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
 
+def mae_1d_small_4_768(**kwargs):
+    model = MaskedAutoencoderViT1d(
+        patch_size=16, in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+'''
 def mae_vit_1d_base_patch16_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT1d(
         patch_size=16, embed_dim=768, depth=12, num_heads=12,
@@ -439,10 +459,15 @@ def mae_vit_1d_huge_patch14_dec512d8b(**kwargs):
         decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
-
+'''
 
 # set recommended archs
+'''
 mae_vit_1d_base_patch16 = mae_vit_1d_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_1d_large_patch16 = mae_vit_1d_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_1d_huge_patch14 = mae_vit_1d_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_1d_base_patch16_uniform = mae_vit_1d_base_patch16_uniform_dec768d12b #decoder: 768 dim, 12 blocks
+'''
+mae1d_large = mae_1d_large_12_1024
+mae1d_base = mae_1d_base_8_768
+mae1d_small =  mae_1d_small_4_768

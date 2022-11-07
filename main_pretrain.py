@@ -52,12 +52,9 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae_vit_base_patch16_uniform', type=str, metavar='MODEL',
-                        help='Name of model to train')
-                        #mae_vit_base_patch16
-                        #mae_vit_large_patch16
-                        #mae_vit_huge_patch14
-                        #mae_vit_base_patch16_uniform
+    parser.add_argument('--model', default='mae2d_large', type=str, choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_base'],
+                        metavar='MODEL', help='Name of model to train')
+
 
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
@@ -71,6 +68,7 @@ def get_args_parser():
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
+    parser.add_argument('--img_weight', type=float, default=0.1, help='weight of img loss in spatial domain')
     parser.add_argument('--divide_loss', action='store_true', 
                         help='to maximize the entropy, to balance the energy, divide exponential term to each pixel loss')
     # Optimizer parameters
@@ -90,7 +88,7 @@ def get_args_parser():
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')
-    parser.add_argument('--downsample', type=int, default=2, help='downsampling factor of original data')
+    parser.add_argument('--downsample', type=int, default=4, help='downsampling factor of original data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
     parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
 
@@ -287,9 +285,9 @@ def main(args):
         )
         valid_log_stats = {**{f'valid_{k}': v.item() for k,v in valid_stats.items()}, 'epoch':epoch,}
 
-        if valid_log_stats['valid_psnr']>best_psnr:
+        if valid_log_stats['valid_psnr_dc']>best_psnr:
             print('Save Best Checkpoint')
-            best_psnr = valid_log_stats['valid_psnr']
+            best_psnr = valid_log_stats['valid_psnr_dc']
             #save
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,

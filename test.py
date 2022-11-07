@@ -15,38 +15,23 @@ from torch.utils.tensorboard import SummaryWriter
 
 import models_mae_1d
 import models_mae
-import util.misc as misc
+# import util.misc as misc
 
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE test', add_help=False)
     # Model parameters
-    parser.add_argument('--model', default='mae_vit_base_patch16_uniform', type=str, metavar='MODEL',
-                        help='Name of model to train')
-                        #mae_vit_base_patch16
-                        #mae_vit_large_patch16
-                        #mae_vit_huge_patch14
-                        #mae_vit_base_patch16_uniform
-
+    parser.add_argument('--model', default='mae2d_large', type=str, choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_base'],
+                        metavar='MODEL', help='Name of model to train')
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
-
-    parser.add_argument('--mask_ratio', default=0.5, type=float,
-                        help='Masking ratio (percentage of removed patches).')
-    parser.add_argument('--norm_pix_loss', action='store_true',
-                        help='Use (per-patch) normalized pixels as targets for computing loss')
-    parser.set_defaults(norm_pix_loss=False)
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
-    parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
-    
-
 
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')
-    parser.add_argument('--downsample', type=int, default=2, help='downsampling factor of original data')
+    parser.add_argument('--downsample', type=int, default=4, help='downsampling factor of original data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
-    parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
 
     # Dataset parameters
     parser.add_argument('--data_path', default='../../data/', type=str,
@@ -63,7 +48,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
-    parser.add_argument('--save_num', default=0, type=int, help='0 is saving all images, otherwise saving only that number of images')
+    parser.add_argument('--save_num', default=100, type=int, help='0 is saving all images, otherwise saving only that number of images')
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -75,7 +60,7 @@ def get_args_parser():
 
 
 def main(args):
-    misc.init_distributed_mode(args)
+    # misc.init_distributed_mode(args)
 
     args.resume = os.path.join(args.output_dir, args.resume)
     args.output_dir = '/'.join(args.resume.split('/')[:-1])
@@ -85,30 +70,29 @@ def main(args):
     device = torch.device(args.device)
 
     # fix the seed for reproducibility
-    seed = args.seed + misc.get_rank()
+    # seed = args.seed + misc.get_rank()
+    seed = args.seed
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
 
     dataset = IXIDataset(args, mode='test')
-    global_rank = misc.get_rank()
+    # global_rank = misc.get_rank()
 
-    if global_rank == 0 and args.log_dir is not None:
-        os.makedirs(args.log_dir, exist_ok=True)
-        log_writer = SummaryWriter(log_dir=args.log_dir)
-    else:
-        log_writer = None
+    # if global_rank == 0 and args.log_dir is not None:
+    #     os.makedirs(args.log_dir, exist_ok=True)
+    #     log_writer = SummaryWriter(log_dir=args.log_dir)
+    # else:
+    #     log_writer = None
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
 
     if '1d' not in args.model:
-        model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                                no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
+        model = models_mae.__dict__[args.model](ssl=args.ssl)
     else:
-        model = models_mae_1d.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                                no_center_mask=args.no_center_mask, num_low_freqs = dataset.num_low_freqs)
+        model = models_mae_1d.__dict__[args.model](ssl=args.ssl)
 
     model.to(device)
 
@@ -144,7 +128,7 @@ def main(args):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            _, _, pred, _  = model(samples, ssl_masks)
+            _, _, pred, _  = model(samples, ssl_masks, full_samples)
 
 
             # Data consistency
@@ -178,6 +162,8 @@ def main(args):
             if args.save_num==i-1:
                 break
 
+    with open(os.path.join(save_folder, 'test_log.txt'), mode='a', encoding='uft-8') as f:
+        f.write(json.dumps(test_stats)+'\n')
     print('Test: {}'.format(', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in test_stats.items()])))
 
 
