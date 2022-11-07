@@ -48,7 +48,7 @@ class MaskedAutoencoderViT1d(nn.Module):
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None, divide_loss=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None, divide_loss=False):
         super().__init__()
 
         self.in_chans = in_chans
@@ -89,6 +89,7 @@ class MaskedAutoencoderViT1d(nn.Module):
 
         self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
+        self.mae = mae
         self.no_center_mask = no_center_mask
         self.train = True
         self.img_size = img_size
@@ -170,8 +171,10 @@ class MaskedAutoencoderViT1d(nn.Module):
         
         if torch.sum(ssl_masks) != 0:
             removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0]
+            # vit -> x need, mae -> needed.  
             if len_keep+len(removed_index)>L:
                 len_keep = L - len(removed_index)
+            
         else:
             removed_index = None
 
@@ -216,6 +219,7 @@ class MaskedAutoencoderViT1d(nn.Module):
                 ids_shuffle = torch.cat([_ids_shuffle, removed_index.repeat(N,1)], dim=1).type(torch.int64)
 
             #make pair
+            """ 
             flip_ids_shuffle = torch.flip(ids_shuffle, dims=[1])
             low_noise = torch.rand(len(ids_low_freq), device=x.device)
             low_ids_shuffle = torch.argsort(low_noise)
@@ -228,7 +232,8 @@ class MaskedAutoencoderViT1d(nn.Module):
             _flip_ids_shuffle=_flip_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1)
             _flip_ids_shuffle = torch.gather(flip_ids_shuffle, dim=1, index=_flip_ids_shuffle)
             flip_ids_shuffle = torch.cat([new_ids_low_keep.repeat(N,1), _flip_ids_shuffle], dim=1).type(torch.int64)
-        
+            """
+            flip_ids_shuffle=None
 
 
         ids_restore = torch.argsort(ids_shuffle, dim=1)
@@ -253,7 +258,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         x = x + self.pos_embed[:, 1:, :]
 
         # masking: length -> length * mask_ratio
-        if self.train:
+        if self.train and self.mae:
             x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, ssl_masks, given_ids_shuffle=given_ids_shuffle)
         else:
             mask = None
@@ -278,7 +283,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         # embed tokens
         x = self.decoder_embed(x)
 
-        if self.train:
+        if self.train and self.mae:
             # append mask tokens to sequence
             mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
             x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
@@ -341,16 +346,18 @@ class MaskedAutoencoderViT1d(nn.Module):
 
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
-        if self.ssl:
+        if self.ssl: # calculate loss in only acquired data 
             loss = loss*sp_masks
         if self.divide_loss is not None:
             divide_loss = self.patchify(self.divide_loss)
             loss = loss*divide_loss.to(loss.device)
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        # loss = (loss * mask).sum() / N  # mean loss on removed patches
-        loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
-        # loss = loss.sum() / N # mean loss on every patches
+        if self.mae:
+            loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
+        else:
+            loss = loss.sum() / N  # mean loss on every patches
+
 
         return loss
 
@@ -436,6 +443,27 @@ def mae_1d_small_4_768(**kwargs):
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
+def vit_1d_large_8_1024(**kwargs):
+    model = MaskedAutoencoderViT1d(
+        patch_size=16, in_chans=2, embed_dim=1024, depth=8, num_heads=16,
+        decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
+    return model
+
+def vit_1d_base_6_768(**kwargs):
+    model = MaskedAutoencoderViT1d(
+        patch_size=16, in_chans=2, embed_dim=768, depth=6, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
+    return model
+
+def vit_1d_small_4_768(**kwargs):
+    model = MaskedAutoencoderViT1d(
+        patch_size=16, in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
+    return model
+
 '''
 def mae_vit_1d_base_patch16_dec512d8b(**kwargs):
     model = MaskedAutoencoderViT1d(
@@ -471,3 +499,6 @@ mae_vit_1d_base_patch16_uniform = mae_vit_1d_base_patch16_uniform_dec768d12b #de
 mae1d_large = mae_1d_large_8_1024
 mae1d_base = mae_1d_base_6_768
 mae1d_small =  mae_1d_small_4_768
+vit1d_large = vit_1d_large_8_1024
+vit1d_base = vit_1d_base_6_768
+vit1d_small =  vit_1d_small_4_768

@@ -52,7 +52,9 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae2d_large', type=str, choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_base'],
+    parser.add_argument('--model', default='mae2d_large', type=str, 
+                        choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
+                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
 
 
