@@ -139,21 +139,9 @@ def valid_one_epoch(model: torch.nn.Module,
     vnum = len(data_loader)
 
     save_folder = os.path.join(args.output_dir, 'valid_epoch{:02d}'.format(epoch))
-    save_concat_folder = os.path.join(save_folder, 'epoch{:02d}_concat'.format(epoch))
-    save_down_folder = os.path.join(save_folder, 'epoch{:02d}_down'.format(epoch))
-    save_pred_folder = os.path.join(save_folder, 'epoch{:02d}_pred'.format(epoch))
-    save_full_folder = os.path.join(save_folder, 'epoch{:02d}_full'.format(epoch))
 
     if not os.path.exists(save_folder):
         os.mkdir(save_folder)
-    if not os.path.exists(save_concat_folder):
-        os.mkdir(save_concat_folder)
-    if not os.path.exists(save_down_folder):
-        os.mkdir(save_down_folder)
-    if not os.path.exists(save_pred_folder):
-        os.mkdir(save_pred_folder)
-    if not os.path.exists(save_full_folder):
-        os.mkdir(save_full_folder)
 
     num_low_freqs = 44
     num_high_freqs = 20
@@ -207,11 +195,8 @@ def valid_one_epoch(model: torch.nn.Module,
             valid_stats['ssim_dc'] += stat_dc['ssim']/vnum
             
             #image save
-            if i%100==0:
-                #imageio.imwrite(os.path.join(save_down_folder, 'ep{:02d}_down_{:03d}.tif'.format(epoch, int(i/100))), samples.squeeze().cpu().numpy())
-                #imageio.imwrite(os.path.join(save_pred_folder, 'ep{:02d}_pred_{:03d}.tif'.format(epoch, int(i/100))), pred.squeeze().cpu().numpy())
-                #imageio.imwrite(os.path.join(save_full_folder, 'ep{:02d}_full_{:03d}.tif'.format(epoch, int(i/100))), full.squeeze().cpu().numpy())
-                imageio.imwrite(os.path.join(save_concat_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/100))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
+            if i%200==0:
+                imageio.imwrite(os.path.join(save_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/200))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats
