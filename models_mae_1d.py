@@ -415,17 +415,17 @@ class MaskedAutoencoderViT1d(nn.Module):
 
 
 
-def mae_1d_large_12_1024(**kwargs):
+def mae_1d_large_8_1024(**kwargs):
     model = MaskedAutoencoderViT1d(
-        patch_size=16, in_chans=2, embed_dim=1024, depth=12, num_heads=12,
-        decoder_embed_dim=1024, decoder_depth=12, decoder_num_heads=16,
+        patch_size=16, in_chans=2, embed_dim=1024, depth=8, num_heads=16,
+        decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_1d_base_8_768(**kwargs):
+def mae_1d_base_6_768(**kwargs):
     model = MaskedAutoencoderViT1d(
-        patch_size=16, in_chans=2, embed_dim=768, depth=8, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=8, decoder_num_heads=16,
+        patch_size=16, in_chans=2, embed_dim=768, depth=6, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
@@ -468,6 +468,6 @@ mae_vit_1d_large_patch16 = mae_vit_1d_large_patch16_dec512d8b  # decoder: 512 di
 mae_vit_1d_huge_patch14 = mae_vit_1d_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
 mae_vit_1d_base_patch16_uniform = mae_vit_1d_base_patch16_uniform_dec768d12b #decoder: 768 dim, 12 blocks
 '''
-mae1d_large = mae_1d_large_12_1024
-mae1d_base = mae_1d_base_8_768
+mae1d_large = mae_1d_large_8_1024
+mae1d_base = mae_1d_base_6_768
 mae1d_small =  mae_1d_small_4_768
