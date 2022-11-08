@@ -55,16 +55,17 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, sslloss, pred, _ = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+                sploss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
         else: 
-            sploss, sslloss, pred, _ = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+            sploss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
 
         # spatial domain loss
         if args.downsample>1:
             pred_dc = samples + pred*ssl_masks
         else:
-            pred_dc = pred
+            pred_dc = samples + pred*mask
+
         pred_dc, full = rifft2(pred_dc[:,:,:,:], full_samples[:,:,:,:], permute=True) 
         maxnum = torch.max(full)
         minnum = torch.min(full)
@@ -100,7 +101,7 @@ def train_one_epoch(model: torch.nn.Module,
         loss_value_reduce = misc.all_reduce_mean(loss_value)
         sploss_value_reduce = misc.all_reduce_mean(sploss.item())
         sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
-        sptloss_value_reduce = misc.all_reduce_mean(imgloss.item())
+        imgloss_value_reduce = misc.all_reduce_mean(imgloss.item())
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
@@ -109,7 +110,7 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sploss', sploss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sslloss', sslloss_value_reduce, epoch_1000x)
-            log_writer.add_scalar('train_sptloss', sptloss_value_reduce, epoch_1000x)
+            log_writer.add_scalar('train_imgloss', imgloss_value_reduce, epoch_1000x)
             
 
             log_writer.add_scalar('lr', lr, epoch_1000x)
