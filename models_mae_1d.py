@@ -353,7 +353,7 @@ class MaskedAutoencoderViT1d(nn.Module):
             loss = loss*divide_loss.to(loss.device)
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        if self.mae:
+        if self.ssl:
             loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         else:
             loss = loss.sum() / N  # mean loss on every patches
