@@ -59,11 +59,11 @@ def train_one_epoch(model: torch.nn.Module,
         else: 
             sploss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
-
         # spatial domain loss
         if args.downsample>1:
             pred_dc = samples + pred*ssl_masks
         else:
+            mask = mask.unsqueeze(1).unsqueeze(-1).repeat(1,2,1,256)
             pred_dc = samples + pred*mask
 
         pred_dc, full = rifft2(pred_dc[:,:,:,:], full_samples[:,:,:,:], permute=True) 
