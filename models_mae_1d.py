@@ -248,7 +248,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore) #(N,L)
 
-        return x_masked, mask, ids_restore, flip_ids_shuffle
+        # return x_masked, mask, ids_restore, flip_ids_shuffle
+        return x_masked, mask, ids_restore, ids_shuffle
 
     def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
         # embed patches
@@ -353,11 +354,19 @@ class MaskedAutoencoderViT1d(nn.Module):
             loss = loss*divide_loss.to(loss.device)
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
-        if self.ssl:
+        if self.mae:
             loss = (loss * mask).sum() / mask.sum()  # mean loss on removed patches
         else:
             loss = loss.sum() / N  # mean loss on every patches
+        
+        return loss
 
+    def forward_loss_latent(self, latent1, latent2):
+        N,L1,_ = latent1.shape
+        
+        loss = torch.abs(latent1-latent2[:,:L1,:])
+        loss = loss.mean(dim=-1)
+        loss = loss.sum() / N
 
         return loss
 
@@ -380,10 +389,14 @@ class MaskedAutoencoderViT1d(nn.Module):
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         #init = self.patchify(imgs)
-        latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio, ssl_masks)
+        latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
         #pred1 = pred1-init
         ppred1 = self.predictor(pred1)
+
+        """ if self.train:
+            latent2, _, _, _ = self.forward_encoder(full, 0, ssl_masks, given_ids_shuffle=ids_shuffle) 
+        """
 
         if self.train and self.ssl: #for train w/ ssl
             imgs2 = imgs.clone()
@@ -409,6 +422,7 @@ class MaskedAutoencoderViT1d(nn.Module):
             return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks, full=full) #mask: 0 is keep, 1 is remove
+            # loss2 = self.forward_loss_latent(latent1, latent2.detach())
             return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
             """ elif not self.train and self.ssl: #not train, ssl
             # 0 is keep, 1 is remove

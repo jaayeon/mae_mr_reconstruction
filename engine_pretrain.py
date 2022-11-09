@@ -46,9 +46,9 @@ def train_one_epoch(model: torch.nn.Module,
     for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
         # we use a per iteration (instead of per epoch) lr scheduler
-        if data_iter_step % accum_iter == 0:
+        """ if data_iter_step % accum_iter == 0:
             lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
-
+        """
         samples = data['down'].to(device, non_blocking=True)
         ssl_masks = data['mask'].to(device, non_blocking=True)
         full_samples = data['full'].to(device, non_blocking=True)
