@@ -196,8 +196,8 @@ def valid_one_epoch(model: torch.nn.Module,
             valid_stats['ssim_dc'] += stat_dc['ssim']/vnum
             
             #image save
-            if i%200==0:
-                imageio.imwrite(os.path.join(save_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/200))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
+            if i%100==0:
+                imageio.imwrite(os.path.join(save_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/100))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats

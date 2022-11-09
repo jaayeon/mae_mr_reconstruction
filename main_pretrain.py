@@ -84,7 +84,7 @@ def get_args_parser():
     parser.add_argument('--min_lr', type=float, default=0., metavar='LR',
                         help='lower lr bound for cyclic schedulers that hit 0')
 
-    parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
+    parser.add_argument('--warmup_epochs', type=int, default=20, metavar='N',
                         help='epochs to warmup LR')
 
     # Data Preprocessing
@@ -170,7 +170,6 @@ def main(args):
     # dataset
     dataset_train = IXIDataset(args, mode='train')
     dataset_valid = IXIDataset(args, mode='valid')
-    print('dataset_train numlow: {}, valid numlow: {}'.format(dataset_train.num_low_freqs, dataset_valid.num_low_freqs))
 
     global_rank = misc.get_rank()
     if args.distributed:
