@@ -64,7 +64,7 @@ def train_one_epoch(model: torch.nn.Module,
             pred_dc = samples + pred*ssl_masks
         else:
             mask = mask.unsqueeze(1).unsqueeze(-1).repeat(1,2,1,256)
-            pred_dc = samples + pred*mask
+            pred_dc = samples*(1-mask) + pred*mask # 0 is keep, 1 is remove
 
         pred_dc, full = rifft2(pred_dc[:,:,:,:], full_samples[:,:,:,:], permute=True) 
         maxnum = torch.max(full)
@@ -143,7 +143,7 @@ def valid_one_epoch(model: torch.nn.Module,
 
     if not os.path.exists(save_folder):
         os.mkdir(save_folder)
-
+    """ 
     num_low_freqs = 44
     num_high_freqs = 20
     h=256
@@ -157,9 +157,9 @@ def valid_one_epoch(model: torch.nn.Module,
     accel_mask = np.zeros(h, dtype=np.float32)
     accel_mask[0::adjusted_accel]=1
     accel_mask = torch.tensor(accel_mask).view(1,-1,1)
-    mask = torch.max(center_mask, accel_mask)
+    mask = torch.max(center_mask, accel_mask) # 1 is keep, 0 is remove
     smasks = torch.ones(2,256,256)*(1-mask)
-
+    """
 
     with torch.no_grad():
         for i, data in enumerate(data_loader):
@@ -167,11 +167,11 @@ def valid_one_epoch(model: torch.nn.Module,
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
 
-            if args.downsample < 2:
+            """ if args.downsample < 2:
                 samples = samples*(mask.to(samples.device))
-                ssl_masks = smasks.to(samples.device)
+                ssl_masks = smasks.to(samples.device) """
 
-            _, _, pred, _  = model(samples, ssl_masks, full_samples)
+            _, _, pred, _  = model(samples, ssl_masks, full_samples, mask_ratio=0)
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)

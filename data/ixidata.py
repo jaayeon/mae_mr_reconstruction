@@ -30,15 +30,18 @@ class IXIDataset(Dataset):
 
         #downsample
         self.down = opt.down
-        self.do_downsample = True if opt.downsample>1 else False
-
+    
         self.rng = np.random.RandomState(opt.seed)
-
-        self.datalist = glob.glob(os.path.join(opt.data_path,opt.dataset,mode,'*','*','*.pkl'))
+        self.datalist = sorted(glob.glob(os.path.join(opt.data_path,opt.dataset,mode,'*','*','*.pkl')))
         
-        self.num_low_freqs = int(opt.input_size/opt.downsample*opt.low_freq_ratio) #select 70% from center line
-        self.num_high_freqs = int(opt.input_size/opt.downsample)-self.num_low_freqs
-
+        if mode=='valid':
+            self.do_downsample = True if opt.v_downsample>1 else False
+            self.num_low_freqs = int(opt.input_size/opt.v_downsample*opt.low_freq_ratio) #select 70% from center line
+            self.num_high_freqs = int(opt.input_size/opt.v_downsample)-self.num_low_freqs
+        else:
+            self.do_downsample = True if opt.downsample>1 else False
+            self.num_low_freqs = int(opt.input_size/opt.downsample*opt.low_freq_ratio) #select 70% from center line
+            self.num_high_freqs = int(opt.input_size/opt.downsample)-self.num_low_freqs
 
     def __getitem__(self, idx):
         with open(self.datalist[idx], 'rb') as f:

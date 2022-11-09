@@ -91,6 +91,7 @@ def get_args_parser():
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')
     parser.add_argument('--downsample', type=int, default=4, help='downsampling factor of original data')
+    parser.add_argument('--v_downsample', type=int, default=4, help='downsampling factor of validation data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
     parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
 
@@ -167,12 +168,9 @@ def main(args):
     cudnn.benchmark = True
 
     # dataset
-    dataset = IXIDataset(args, mode='train')
-
-    tnum = int(len(dataset)*0.95)
-    vnum = len(dataset)-tnum
-    dataset_train, dataset_valid = torch.utils.data.random_split(dataset, [tnum, vnum])
-
+    dataset_train = IXIDataset(args, mode='train')
+    dataset_valid = IXIDataset(args, mode='valid')
+    print('dataset_train numlow: {}, valid numlow: {}'.format(dataset_train.num_low_freqs, dataset_valid.num_low_freqs))
 
     global_rank = misc.get_rank()
     if args.distributed:
@@ -205,7 +203,7 @@ def main(args):
         pin_memory=args.pin_mem, 
         drop_last=False
     )
-    num_low_freqs = 44 if dataset.num_low_freqs>44 else dataset.num_low_freqs
+    num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
     # define the model
     if '1d' not in args.model:
         model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 

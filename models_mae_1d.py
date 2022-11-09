@@ -258,7 +258,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         x = x + self.pos_embed[:, 1:, :]
 
         # masking: length -> length * mask_ratio
-        if self.train and self.mae:
+        if self.mae:
             x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, ssl_masks, given_ids_shuffle=given_ids_shuffle)
         else:
             mask = None
@@ -283,7 +283,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         # embed tokens
         x = self.decoder_embed(x)
 
-        if self.train and self.mae:
+        if self.mae:
             # append mask tokens to sequence
             mask_tokens = self.mask_token.repeat(x.shape[0], ids_restore.shape[1] + 1 - x.shape[1], 1) #(1,1,D)->(N,L*0.75,D)
             x_ = torch.cat([x[:, 1:, :], mask_tokens], dim=1)  # no cls token
