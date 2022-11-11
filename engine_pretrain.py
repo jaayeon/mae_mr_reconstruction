@@ -28,7 +28,7 @@ from util.metric import calc_metrics
 def train_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
-                    log_writer=None, lr_scheduler=None
+                    log_writer=None, lr_scheduler=None,
                     args=None):
     model.train=True
     metric_logger = misc.MetricLogger(delimiter="  ")

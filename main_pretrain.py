@@ -86,7 +86,7 @@ def get_args_parser():
 
     parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--lr_scheduler', typy=str, default='cosine', choices=['cosine', 'base', None])
+    parser.add_argument('--lr_scheduler', type=str, default='cosine', choices=['cosine', 'base', None])
 
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
@@ -248,7 +248,7 @@ def main(args):
     best_psnr = 0.0
 
     if args.lr_scheduler=='cosine':
-        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     else: 
         lr_scheduler = None
     #resume
