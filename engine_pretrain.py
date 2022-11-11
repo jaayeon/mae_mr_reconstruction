@@ -44,15 +44,6 @@ def train_one_epoch(model: torch.nn.Module,
         print('log_dir: {}'.format(log_writer.log_dir))
     
     for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
-
-        if args.lr_scheduler=='cosine':
-            lr_scheduler.step()
-        elif args.lr_scheduler=='base':
-            # we use a per iteration (instead of per epoch) lr scheduler
-            if data_iter_step % accum_iter == 0:
-                lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
-        else:
-            pass
        
         samples = data['down'].to(device, non_blocking=True)
         ssl_masks = data['mask'].to(device, non_blocking=True)
@@ -89,6 +80,16 @@ def train_one_epoch(model: torch.nn.Module,
         loss /= accum_iter
         loss_scaler(loss, optimizer, parameters=model.parameters(),     #clip_grad=1
                     update_grad=(data_iter_step + 1) % accum_iter == 0)
+        
+        #lr scheduler
+        if args.lr_scheduler=='cosine':
+            lr_scheduler.step()
+        elif args.lr_scheduler=='base':
+            # we use a per iteration (instead of per epoch) lr scheduler
+            if data_iter_step % accum_iter == 0:
+                lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
+        else:
+            pass
 
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
