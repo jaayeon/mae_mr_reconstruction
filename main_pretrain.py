@@ -47,12 +47,12 @@ def get_args_parser():
     parser = argparse.ArgumentParser('MAE pre-training', add_help=False)
     parser.add_argument('--batch_size', default=64, type=int,
                         help='Batch size per GPU (effective batch size is batch_size * accum_iter * # gpus')
-    parser.add_argument('--epochs', default=100, type=int)
+    parser.add_argument('--epochs', default=200, type=int)
     parser.add_argument('--accum_iter', default=1, type=int,
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae2d_large', type=str, 
+    parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
@@ -86,6 +86,7 @@ def get_args_parser():
 
     parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
                         help='epochs to warmup LR')
+    parser.add_argument('--lr_scheduler', typy=str, default='cosine', choices=['cosine', 'base', None])
 
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
@@ -110,7 +111,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
-    parser.add_argument('--note', default='base', type=str, help='add to checkpoint base name')
+    parser.add_argument('--note', default=None, type=str, help='add to checkpoint base name')
     parser.add_argument('--detect_anomaly', action='store_true', 
                         help='torch.autograd.set_detect_anomaly(true), but very slow (7~8 times)')
     parser.add_argument('--autocast', action='store_true', 
@@ -147,7 +148,7 @@ def main(args):
     # set checkpoint saving directory
     dt = datetime.datetime.now()
     if not args.resume:
-        base = '{}_{}'.format(dt.strftime('%m%d'), args.note)
+        base = '{}_{}_X{}{}'.format(dt.strftime('%m%d'), args.model, args.downsample, '_'+args.note if args.note!=None else '')
         args.output_dir = os.path.join(args.output_dir, base)
         if not os.path.exists(args.output_dir):
             os.mkdir(args.output_dir)
@@ -246,6 +247,10 @@ def main(args):
     loss_scaler = NativeScaler()
     best_psnr = 0.0
 
+    if args.lr_scheduler=='cosine':
+        lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epoch)
+    else: 
+        lr_scheduler = None
     #resume
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
     print(f"Start training for {args.epochs} epochs")
@@ -259,6 +264,7 @@ def main(args):
             model, data_loader_train,
             optimizer, device, epoch, loss_scaler,
             log_writer=log_writer,
+            lr_scheduler=lr_scheduler,
             args=args
         )
 

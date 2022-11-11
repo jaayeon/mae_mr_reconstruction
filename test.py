@@ -6,6 +6,7 @@ import argparse
 import numpy as np
 import imageio
 from pathlib import Path
+import json
 
 from data.ixidata import IXIDataset
 from util.mri_tools import rifft2
@@ -20,7 +21,10 @@ import models_mae
 def get_args_parser():
     parser = argparse.ArgumentParser('MAE test', add_help=False)
     # Model parameters
-    parser.add_argument('--model', default='mae2d_large', type=str, choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_base'],
+    # Model parameters
+    parser.add_argument('--model', default='mae2d_small', type=str, 
+                        choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
+                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
@@ -48,7 +52,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
-    parser.add_argument('--save_num', default=100, type=int, help='0 is saving all images, otherwise saving only that number of images')
+    parser.add_argument('--save_num', default=1000, type=int, help='0 is saving all images, otherwise saving only that number of images')
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,
@@ -162,8 +166,8 @@ def main(args):
             if args.save_num==i-1:
                 break
 
-    with open(os.path.join(save_folder, 'test_log.txt'), mode='a', encoding='uft-8') as f:
-        f.write(json.dumps(test_stats)+'\n')
+    with open(os.path.join(save_folder, 'test_log.txt'), mode='a', encoding="utf-8") as f:
+        f.write(', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in test_stats.items()])+'\n')
     print('Test: {}'.format(', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in test_stats.items()])))
 
 

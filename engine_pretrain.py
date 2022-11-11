@@ -28,7 +28,7 @@ from util.metric import calc_metrics
 def train_one_epoch(model: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, loss_scaler,
-                    log_writer=None,
+                    log_writer=None, lr_scheduler=None
                     args=None):
     model.train=True
     metric_logger = misc.MetricLogger(delimiter="  ")
@@ -42,13 +42,18 @@ def train_one_epoch(model: torch.nn.Module,
 
     if log_writer is not None:
         print('log_dir: {}'.format(log_writer.log_dir))
-
+    
     for data_iter_step, data in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
 
-        # we use a per iteration (instead of per epoch) lr scheduler
-        """ if data_iter_step % accum_iter == 0:
-            lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
-        """
+        if args.lr_scheduler=='cosine':
+            lr_scheduler.step()
+        elif args.lr_scheduler=='base':
+            # we use a per iteration (instead of per epoch) lr scheduler
+            if data_iter_step % accum_iter == 0:
+                lr_sched.adjust_learning_rate(optimizer, data_iter_step / len(data_loader) + epoch, args)
+        else:
+            pass
+       
         samples = data['down'].to(device, non_blocking=True)
         ssl_masks = data['mask'].to(device, non_blocking=True)
         full_samples = data['full'].to(device, non_blocking=True)
@@ -114,14 +119,7 @@ def train_one_epoch(model: torch.nn.Module,
             
 
             log_writer.add_scalar('lr', lr, epoch_1000x)
-        # i=0
-        # for name, param in model.named_parameters():
-        #     i+=1
-        #     if i==9 and param.requires_grad:
-        #         print(name)
-        #         print('during model.params: \n', param.data)
-        #         print('during model.params.grad: \n', param.grad)
-        #         break
+
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
