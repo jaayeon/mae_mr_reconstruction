@@ -52,7 +52,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
-    parser.add_argument('--save_num', default=1000, type=int, help='0 is saving all images, otherwise saving only that number of images')
+    parser.add_argument('--save_num', default=100, type=int, help='0 is saving all images, otherwise saving only that number of images')
 
     # distributed training parameters
     parser.add_argument('--world_size', default=1, type=int,

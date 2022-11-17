@@ -86,7 +86,7 @@ def get_args_parser():
 
     parser.add_argument('--warmup_epochs', type=int, default=40, metavar='N',
                         help='epochs to warmup LR')
-    parser.add_argument('--lr_scheduler', type=str, default='cosine', choices=['cosine', 'base', None])
+    parser.add_argument('--lr_scheduler', type=str, default='base', choices=['cosine', 'base', 'none'])
 
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
