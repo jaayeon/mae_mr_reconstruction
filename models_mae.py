@@ -291,7 +291,7 @@ class MaskedAutoencoderViT(nn.Module):
 
         return x
 
-    def forward_loss(self, imgs, pred, mask, sp_masks, full=None):
+    def forward_loss(self, imgs, pred, mask, ssl_masks, full=None):
         """
         imgs: [N, 2, H, W]
         pred: [N, L, p*p*2]
@@ -301,6 +301,7 @@ class MaskedAutoencoderViT(nn.Module):
         """
         N,L,_=pred.shape
 
+        sp_masks = 1-ssl_masks
         sp_masks = self.patchify(sp_masks)
         if full is not None:
             target = self.patchify(full)
@@ -326,6 +327,31 @@ class MaskedAutoencoderViT(nn.Module):
             loss = (loss * mask).sum() / mask.sum() # mean loss on removed patches
         else:
             loss = loss.sum() / N  # mean loss on every patches
+
+        return loss
+    
+    def forward_sp_loss(self, pred, full, mask, ssl_masks):
+        """
+        imgs: [N, 2, H, W]
+        pred: [N, L, p*p*2]
+        mask: [N, L], 0 is keep, 1 is remove, 
+        ssl_masks: [N, 1, H, W] 0 is keep, 1 is remove
+        calculate only predicted region.
+        """
+        N,L,_=pred.shape
+
+        ssl_masks = self.patchify(ssl_masks)
+        target = self.patchify(full)
+        if self.norm_pix_loss:
+            mean = target.mean(dim=-1, keepdim=True)
+            var = target.var(dim=-1, keepdim=True)
+            target = (target - mean) / (var + 1.e-6)**.5
+
+        loss = torch.abs(pred - target)
+
+        loss = (loss*ssl_masks).mean(dim=-1)*(1-mask) + (loss.mean(dim=-1))*mask
+
+        loss = loss.sum() / N  # mean loss on every patches
 
         return loss
 
@@ -367,13 +393,14 @@ class MaskedAutoencoderViT(nn.Module):
             pass
 
         if self.train and self.ssl:
-            loss1 = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks) #mask: 0 is keep, 1 is remove
-            loss2 = self.forward_loss(imgs, pred2, mask2, 1-ssl_masks) #mask: 0 is keep, 1 is remove
+            loss1 = self.forward_loss(imgs, pred1, mask1, ssl_masks) #mask: 0 is keep, 1 is remove
+            loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
             return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
         elif self.train and not self.ssl:
-            loss = self.forward_loss(imgs, pred1, mask1, 1-ssl_masks, full=full) #mask: 0 is keep, 1 is remove
+            #loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
+            loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
             return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
             """ elif not self.train and self.ssl: #not train, ssl
             # 0 is keep, 1 is remove
