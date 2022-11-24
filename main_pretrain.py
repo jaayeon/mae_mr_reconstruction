@@ -56,6 +56,7 @@ def get_args_parser():
                         choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
+    parser.add_argument('--patch_size', default=16, type=int)
 
 
     parser.add_argument('--input_size', default=256, type=int, #default 224
@@ -206,7 +207,7 @@ def main(args):
     num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
     # define the model
     if '1d' not in args.model:
-        model = models_mae.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+        model = models_mae.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             no_center_mask=args.no_center_mask, 
                                             num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)

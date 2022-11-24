@@ -414,24 +414,24 @@ class MaskedAutoencoderViT(nn.Module):
 
 
 
-def mae_2d_large_8_1024(**kwargs):
+def mae_2d_large_8_1024(**kwargs): #1024, 8
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=1024, depth=8, num_heads=16,
-        decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
+        in_chans=2, embed_dim=768, depth=12, num_heads=16,
+        decoder_embed_dim=768, decoder_depth=12, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_2d_base_6_768(**kwargs):
+def mae_2d_base_6_768(**kwargs): #768, 6
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=6, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
+        in_chans=2, embed_dim=512, depth=8, num_heads=12,
+        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_2d_small_4_768(**kwargs):
+def mae_2d_small_4_768(**kwargs): #768, 4
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=4, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        in_chans=2, embed_dim=384, depth=6, num_heads=12,
+        decoder_embed_dim=384, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
