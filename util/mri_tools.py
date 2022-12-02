@@ -123,3 +123,16 @@ def rAtA(data, mask):
     data = ifft2(data)
     data = data[..., 0].unsqueeze(-1)
     return data
+
+
+def normalize(arr, eps=1e-08): #[0,1] for imgspace
+    max = torch.max(arr)
+    min = torch.min(arr)
+    arr = (arr-min)/(max-min+eps)
+    return arr
+
+
+def scale(arr): #[-6,6] for kspace
+    absmax = torch.max(torch.abs(arr))
+    arr = arr/absmax*10
+    return arr

@@ -19,6 +19,7 @@ import torch.nn as nn
 from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
+from util.mri_tools import rifft2, normalize
 
 
 class MaskedAutoencoderViT(nn.Module):
@@ -27,7 +28,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, no_center_mask=False, num_low_freqs=None, divide_loss=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -59,15 +60,22 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
 
+        """ 
         self.predictor = nn.Sequential(nn.Linear(patch_size**2*in_chans, 128, bias=True),
                                         nn.GELU(),
                                         nn.Linear(128, patch_size**2*in_chans))
+        """
+        self.spatialblock = nn.Sequential(
+                                nn.Conv2d(1,64,1),
+                                ResBlock(64,5),
+                                nn.Conv2d(64,1,1))
+
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
         self.mae = mae
-        self.no_center_mask = no_center_mask
+        self.mask_center = mask_center
         self.train = True
         self.img_size = img_size
         self.num_low_freqs = num_low_freqs
@@ -164,7 +172,7 @@ class MaskedAutoencoderViT(nn.Module):
             ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
             flip_ids_shuffle=None
 
-            if self.no_center_mask:
+            if not self.mask_center:
                 # get center mask start index & ending index
                 h=torch.sqrt(torch.tensor(L)) #same as w
                 start = int(torch.round((self.img_size-self.num_low_freqs)/2/self.img_size*h))
@@ -370,12 +378,34 @@ class MaskedAutoencoderViT(nn.Module):
         sslloss = sslloss.sum()/N
 
         return sslloss
+    
+    def forward_img_loss(self, predimg, fullimg):
+        N,_,_,_=predimg.shape
+        imgloss = torch.sum(torch.abs(predimg-fullimg))/N
+        return imgloss
 
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
-        ppred1 = self.predictor(pred1)
+        #ppred1 = self.predictor(pred1)
+        #pred1 = pred1+ self.patchify(imgs)
+        
+        #dc layer
+        predfreq1 = self.unpatchify(pred1)
+        predfreq1 = imgs + predfreq1*ssl_masks 
+        #ifft
+        predimg1, fullimg = rifft2(predfreq1, full, permute=True)
+        maxnum = torch.max(fullimg)
+        minnum = torch.min(fullimg)
+        predimg1 = (predimg1-minnum)/(maxnum-minnum+1e-08)
+        fullimg = (fullimg-minnum)/(maxnum-minnum+1e-08)
+        #predimg1 = normalize(predimg1)
+        #fullimg = normalize(fullimg)
+        
+        #spatial block
+        predimg1 = self.spatialblock(predimg1) + predimg1
+
 
         if self.train and self.ssl: #for train w/ ssl
             imgs2 = imgs.clone()
@@ -400,8 +430,10 @@ class MaskedAutoencoderViT(nn.Module):
             return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
+            imgloss = self.forward_img_loss(predimg1, fullimg)
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
-            return loss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
+            #return loss+imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
             """ elif not self.train and self.ssl: #not train, ssl
             # 0 is keep, 1 is remove
             mask1 = mask1.unsqueeze(-1).repeat(1,1,pred1.shape[-1])
@@ -411,6 +443,27 @@ class MaskedAutoencoderViT(nn.Module):
             """
         else: #not train, not ssl
             return None, None, self.unpatchify(pred1), mask1
+
+
+class ResBlock(nn.Module):
+    def __init__(self, n_feats, kernel_size, bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
+        super(ResBlock, self).__init__()
+
+        m=[]
+        for i in range(2):
+            m.append(nn.Conv2d(n_feats, n_feats, kernel_size, padding=kernel_size//2, bias=bias))
+            if bn:
+                m.append(nn.BatchNorm2d(n_feats))
+            if i==0:
+                m.append(act)
+        self.body = nn.Sequential(*m)
+        self.res_scale = res_scale
+    
+    def forward(self, x):
+        res = self.body(x).mul(self.res_scale)
+        res += x
+
+        return res
 
 
 
@@ -432,6 +485,13 @@ def mae_2d_small_4_768(**kwargs):
     model = MaskedAutoencoderViT(
         in_chans=2, embed_dim=768, depth=4, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+    return model
+
+def mae_2d_optim(**kwargs):
+    model = MaskedAutoencoderViT(
+        in_chans=2, embed_dim=384, depth=4, num_heads=12,
+        decoder_embed_dim=384, decoder_depth=4, decoder_num_heads=12,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
@@ -488,6 +548,7 @@ def mae_vit_huge_patch14_dec512d8b(**kwargs):
 mae2d_large = mae_2d_large_8_1024 #decoder: 768 dim, 12 blocks
 mae2d_base = mae_2d_base_6_768
 mae2d_small = mae_2d_small_4_768
+mae2d_optim = mae_2d_optim
 
 vit2d_large = vit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
 vit2d_base = vit_2d_base_6_768

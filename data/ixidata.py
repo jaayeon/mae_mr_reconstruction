@@ -70,7 +70,7 @@ class IXIDataset(Dataset):
 
     def scale(self, arr): #[-6~6] for kspace
         absmax = torch.max(torch.abs(arr))
-        arr = arr/absmax*6
+        arr = arr/absmax*10
         return arr
 
 

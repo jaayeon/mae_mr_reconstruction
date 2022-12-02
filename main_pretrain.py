@@ -53,7 +53,7 @@ def get_args_parser():
 
     # Model parameters
     parser.add_argument('--model', default='mae2d_small', type=str, 
-                        choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
+                        choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
@@ -95,8 +95,7 @@ def get_args_parser():
     parser.add_argument('--downsample', type=int, default=4, help='downsampling factor of original data')
     parser.add_argument('--v_downsample', type=int, default=4, help='downsampling factor of validation data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
-    parser.add_argument('--no_center_mask', action='store_true', help='preserving center in kspace from random_masking')
-
+    parser.add_argument('--mask_center', action='store_true', help='preserving center in kspace from random_masking')
     # Dataset parameters
     parser.add_argument('--data_path', default='../../data/', type=str,
                         help='dataset path')
@@ -115,8 +114,9 @@ def get_args_parser():
     parser.add_argument('--note', default=None, type=str, help='add to checkpoint base name')
     parser.add_argument('--detect_anomaly', action='store_true', 
                         help='torch.autograd.set_detect_anomaly(true), but very slow (7~8 times)')
-    parser.add_argument('--autocast', action='store_true', 
+    parser.add_argument('--no_autocast', action='store_false', dest='autocast',
                         help='set torch.cuda.amp.autocast(): float32 -> float16. 0.6 faster, but sth cause nan value...')
+    parser.set_defaults(autocast=True)
 
     parser.add_argument('--start_epoch', default=1, type=int, metavar='N',
                         help='start epoch')
@@ -208,12 +208,12 @@ def main(args):
     # define the model
     if '1d' not in args.model:
         model = models_mae.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                            no_center_mask=args.no_center_mask, 
+                                            mask_center=args.mask_center, 
                                             num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)
     else:
         model = models_mae_1d.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                            no_center_mask=args.no_center_mask, 
+                                            mask_center=args.mask_center, 
                                             num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)
 
@@ -254,6 +254,10 @@ def main(args):
         lr_scheduler = None
     #resume
     misc.load_model(args=args, model_without_ddp=model_without_ddp, optimizer=optimizer, loss_scaler=loss_scaler)
+
+    #param
+    n_param = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print('Number of params: {:.2f}M'.format(n_param/1024/1024))
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):

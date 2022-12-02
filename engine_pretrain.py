@@ -56,10 +56,11 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+                sploss, imgloss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
         else: 
-            sploss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+            sploss, imgloss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
+        """ 
         # spatial domain loss
         if args.downsample>1:
             pred_dc = samples + pred*ssl_masks
@@ -74,7 +75,7 @@ def train_one_epoch(model: torch.nn.Module,
         full = (full-minnum)/(maxnum-minnum+1e-08)
         imgloss = torch.sum(torch.abs(pred_dc-full))/samples.shape[0]/256      
         # imgloss = torch.tensor([0], device=sploss.device)
-
+        """
         loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss
         loss_value = loss.item()
 

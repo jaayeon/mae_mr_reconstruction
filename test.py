@@ -23,11 +23,12 @@ def get_args_parser():
     # Model parameters
     # Model parameters
     parser.add_argument('--model', default='mae2d_small', type=str, 
-                        choices=['mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
+                        choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
+    parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
 
@@ -94,9 +95,9 @@ def main(args):
     )
 
     if '1d' not in args.model:
-        model = models_mae.__dict__[args.model](ssl=args.ssl)
+        model = models_mae.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
     else:
-        model = models_mae_1d.__dict__[args.model](ssl=args.ssl)
+        model = models_mae_1d.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
 
     model.to(device)
 
