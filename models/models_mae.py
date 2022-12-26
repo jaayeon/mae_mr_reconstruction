@@ -65,11 +65,6 @@ class MaskedAutoencoderViT(nn.Module):
                                         nn.GELU(),
                                         nn.Linear(128, patch_size**2*in_chans))
         """
-        self.spatialblock = nn.Sequential(
-                                nn.Conv2d(1,64,1),
-                                ResBlock(64,5),
-                                nn.Conv2d(64,1,1))
-
         # --------------------------------------------------------------------------
 
         self.norm_pix_loss = norm_pix_loss
@@ -388,12 +383,11 @@ class MaskedAutoencoderViT(nn.Module):
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
-        #ppred1 = self.predictor(pred1)
-        #pred1 = pred1+ self.patchify(imgs)
         
         #dc layer
         predfreq1 = self.unpatchify(pred1)
         predfreq1 = imgs + predfreq1*ssl_masks 
+
         #ifft
         predimg1, fullimg = rifft2(predfreq1, full, permute=True)
         maxnum = torch.max(fullimg)
@@ -403,10 +397,6 @@ class MaskedAutoencoderViT(nn.Module):
         #predimg1 = normalize(predimg1)
         #fullimg = normalize(fullimg)
         
-        #spatial block
-        predimg1 = self.spatialblock(predimg1) + predimg1
-
-
         if self.train and self.ssl: #for train w/ ssl
             imgs2 = imgs.clone()
             latent2, mask2, ids_restore2, _ = self.forward_encoder(imgs2, mask_ratio)
@@ -434,15 +424,8 @@ class MaskedAutoencoderViT(nn.Module):
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
             #return loss+imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
             return loss, imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
-            """ elif not self.train and self.ssl: #not train, ssl
-            # 0 is keep, 1 is remove
-            mask1 = mask1.unsqueeze(-1).repeat(1,1,pred1.shape[-1])
-            pred = pred1*mask1 + pred2*(1-mask1)
-
-            return None, None, self.unpatchify(pred), mask1 
-            """
         else: #not train, not ssl
-            return None, None, self.unpatchify(pred1), mask1
+            return self.unpatchify(pred1), mask1
 
 
 class ResBlock(nn.Module):
@@ -465,6 +448,24 @@ class ResBlock(nn.Module):
 
         return res
 
+
+class Mlp(nn.Module):
+    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
+        super().__init__()
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_feautures
+        self.fc1 = nn.Linear(in_features, hidden_features)
+        self.act = act_layer()
+        self.fc2 = nn.Linear(hidden_features, out_features)
+        self.drop = nn.Dropout(drop)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.drop(x)
+        x = self.fc2(x)
+        x = self.drop(x)
+        return x
 
 
 def mae_2d_large_8_1024(**kwargs):

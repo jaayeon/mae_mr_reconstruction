@@ -32,8 +32,7 @@ import timm.optim.optim_factory as optim_factory
 import util.misc as misc
 from util.misc import NativeScalerWithGradNormCount as NativeScaler
 
-import models_mae
-import models_mae_1d
+import models
 
 from engine_pretrain import train_one_epoch, valid_one_epoch
 
@@ -54,7 +53,8 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
-                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
+                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
+                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
 
@@ -95,7 +95,7 @@ def get_args_parser():
     parser.add_argument('--downsample', type=int, default=4, help='downsampling factor of original data')
     parser.add_argument('--v_downsample', type=int, default=4, help='downsampling factor of validation data')
     parser.add_argument('--low_freq_ratio', type=float, default=0.7, help='ratio of low frequency lines in undersampled data')
-    parser.add_argument('--mask_center', action='store_true', help='preserving center in kspace from random_masking')
+    parser.add_argument('--mask_center', action='store_true', help='not preserving center in kspace from random_masking')
     # Dataset parameters
     parser.add_argument('--data_path', default='../../data/', type=str,
                         help='dataset path')
@@ -207,12 +207,12 @@ def main(args):
     num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
     # define the model
     if '1d' not in args.model:
-        model = models_mae.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+        model = models.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             mask_center=args.mask_center, 
                                             num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)
     else:
-        model = models_mae_1d.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+        model = models.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             mask_center=args.mask_center, 
                                             num_low_freqs=num_low_freqs,
                                             divide_loss=args.divide_loss)

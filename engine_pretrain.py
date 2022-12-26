@@ -143,23 +143,6 @@ def valid_one_epoch(model: torch.nn.Module,
 
     if not os.path.exists(save_folder):
         os.mkdir(save_folder)
-    """ 
-    num_low_freqs = 44
-    num_high_freqs = 20
-    h=256
-    center_mask = np.zeros(256, dtype=np.float32)
-    pad = (256 - num_low_freqs + 1) // 2
-    center_mask[pad : pad+num_low_freqs]=1
-    assert center_mask.sum() == num_low_freqs
-    center_mask = torch.tensor(center_mask).view(1,-1,1)
-    
-    adjusted_accel = int((h-num_low_freqs)/(num_high_freqs))
-    accel_mask = np.zeros(h, dtype=np.float32)
-    accel_mask[0::adjusted_accel]=1
-    accel_mask = torch.tensor(accel_mask).view(1,-1,1)
-    mask = torch.max(center_mask, accel_mask) # 1 is keep, 0 is remove
-    smasks = torch.ones(2,256,256)*(1-mask)
-    """
 
     with torch.no_grad():
         for i, data in enumerate(data_loader):
