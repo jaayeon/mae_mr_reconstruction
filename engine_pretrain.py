@@ -154,7 +154,7 @@ def valid_one_epoch(model: torch.nn.Module,
                 samples = samples*(mask.to(samples.device))
                 ssl_masks = smasks.to(samples.device) """
 
-            _, _, pred, _  = model(samples, ssl_masks, full_samples, mask_ratio=0)
+            pred, _  = model(samples, ssl_masks, full_samples, mask_ratio=0)
 
             # Data consistency
             pred = torch.clamp(pred, min=-1, max=1)
