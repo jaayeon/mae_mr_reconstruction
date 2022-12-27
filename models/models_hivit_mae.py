@@ -418,7 +418,7 @@ class HiViTMaskedAutoencoder(HiViT, nn.Module):
 
 def mae_hivit_base_8_768(**kwargs):
     model = HiViTMaskedAutoencoder(
-        in_chans=2, embed_dim=768, depths=[1,1,8], num_heads=12, stem_mlp_ratio=3., mlp_ratio=4., 
+        in_chans=2, embed_dim=768, depths=[2,2,8], num_heads=12, stem_mlp_ratio=3., mlp_ratio=4., 
         decoder_embed_dim=768, decoder_depth=8, decoder_num_heads=16, hifeat=False,
         rpe=False, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model

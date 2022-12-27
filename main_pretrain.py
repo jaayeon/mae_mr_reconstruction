@@ -51,7 +51,7 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae2d_small', type=str, 
+    parser.add_argument('--model', default='mae2d_base', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
                                     'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base'],
@@ -71,7 +71,7 @@ def get_args_parser():
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
-    parser.add_argument('--img_weight', type=float, default=0.1, help='weight of img loss in spatial domain')
+    parser.add_argument('--img_weight', type=float, default=0.01, help='weight of img loss in spatial domain')
     parser.add_argument('--divide_loss', action='store_true', 
                         help='to maximize the entropy, to balance the energy, divide exponential term to each pixel loss')
     # Optimizer parameters
