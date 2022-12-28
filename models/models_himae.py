@@ -201,8 +201,8 @@ class hiMaskedAutoencoderViT(nn.Module):
                 _ids_shuffle = torch.gather(ids_shuffle, dim=1, index=_ids_shuffle) # get elements not included in ids_low_keep
                 ids_shuffle = torch.cat([ids_low_keep.repeat(N,1), _ids_shuffle], dim=1).type(torch.int64)
 
-
                 #make pair
+                """ 
                 flip_ids_shuffle = torch.flip(ids_shuffle, dims=[1])
                 low_noise = torch.rand(len(ids_low_freq), device=x.device)
                 low_ids_shuffle = torch.argsort(low_noise)
@@ -215,8 +215,7 @@ class hiMaskedAutoencoderViT(nn.Module):
                 _flip_ids_shuffle=_flip_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1)
                 _flip_ids_shuffle = torch.gather(flip_ids_shuffle, dim=1, index=_flip_ids_shuffle)
                 flip_ids_shuffle = torch.cat([new_ids_low_keep.repeat(N,1), _flip_ids_shuffle], dim=1).type(torch.int64)
-        
-
+                """
 
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
@@ -252,6 +251,8 @@ class hiMaskedAutoencoderViT(nn.Module):
         for blk in self.mblocks:
             x = blk(x)
         x = x[..., 0, 0, :]
+        
+        # add pos embed w/o cls token
         if self.train and self.mae:
             pos_embed = torch.gather(self.pos_embed.expand(B,-1,-1)[:,1:,:], dim=1, index=ids_keep[:,:,None].expand(-1,-1,x.shape[2]))
         else:
@@ -301,19 +302,20 @@ class hiMaskedAutoencoderViT(nn.Module):
         '''
         for blk in self.decoder_blocks:
             x = blk(x)
-        
 
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
+
         x = self.decoder_norm(x)
 
         # predictor projection
         x = self.decoder_pred(x)
 
         # remove cls token
+        cls = x[:, :1, :]
         x = x[:, 1:, :]
 
-        return x
+        return cls, x
 
     def forward_loss(self, imgs, pred, mask, ssl_masks, full=None):
         """
@@ -403,7 +405,7 @@ class hiMaskedAutoencoderViT(nn.Module):
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, ids_keep = self.forward_encoder(imgs, mask_ratio)
-        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+        cls, pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
         
         #dc layer
         predfreq1 = self.unpatchify(pred1)
@@ -453,6 +455,7 @@ class hiMaskedAutoencoderViT(nn.Module):
 class MlpPatchMerge(nn.Module):
     def __init__(self, dim, norm_layer=nn.LayerNorm, act_layer=nn.GELU, mlp_ratio=4., drop_path=0.):
         super().__init__()
+        #Mlp
         mlp_hidden_features = int(dim*mlp_ratio)
         self.norm1 = norm_layer(dim)
         self.norm2 = norm_layer(dim)
@@ -460,13 +463,16 @@ class MlpPatchMerge(nn.Module):
         self.mlp2 = Mlp(in_features=dim, hidden_features=mlp_hidden_features, act_layer=act_layer)
         self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
 
+        #PatchMerge
         self.norm = norm_layer(dim*4)
         self.reduction = nn.Linear(dim*4, dim*2, bias=False)
 
     def forward(self, x):
+        #Mlp
         x = x + self.drop_path(self.mlp2(self.norm1(x)))
         x = x + self.drop_path(self.mlp2(self.norm2(x)))
-
+        
+        #PatchMerge
         x0 = x[..., 0::2, 0::2, :]
         x1 = x[..., 1::2, 0::2, :]
         x2 = x[..., 0::2, 1::2, :]

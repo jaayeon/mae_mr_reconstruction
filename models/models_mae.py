@@ -278,9 +278,9 @@ class MaskedAutoencoderViT(nn.Module):
             if not torch.isfinite(x).all():
                 print('anomaly detected in after {}th block'.format(i))
         '''
-        for blk in self.decoder_blocks:
-            x = blk(x)
-        
+        with torch.cuda.amp.autocast(enabled=False):
+            for blk in self.decoder_blocks:
+                x = blk(x)
 
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
