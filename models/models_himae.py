@@ -514,21 +514,21 @@ class PatchEmbed(nn.Module):
         return x
 
 
-def mae_2d_large_8_1024(**kwargs):
+def himae_large_8_1024(**kwargs):
     model = hiMaskedAutoencoderViT(
         in_chans=2, embed_dim=1024, depth=8, stage=3, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_2d_base_6_768(**kwargs):
+def himae_base_6_768(**kwargs):
     model = hiMaskedAutoencoderViT(
         in_chans=2, embed_dim=768, depth=6, stage=3, num_heads=12,
         decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
-def mae_2d_small_4_768(**kwargs):
+def himae_small_4_768(**kwargs):
     model = hiMaskedAutoencoderViT(
         in_chans=2, embed_dim=768, depth=4, stage=3, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
@@ -559,9 +559,9 @@ def vit_2d_small_4_768(**kwargs):
     return model
 
 
-himae_large = mae_2d_large_8_1024 #decoder: 768 dim, 12 blocks
-himae_base = mae_2d_base_6_768
-himae_small = mae_2d_small_4_768
+himae_large = himae_large_8_1024 #decoder: 768 dim, 12 blocks
+himae_base = himae_base_6_768
+himae_small = himae_small_4_768
 
 #vit2d_large = vit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
 #vit2d_base = vit_2d_base_6_768

@@ -54,7 +54,7 @@ def get_args_parser():
     parser.add_argument('--model', default='mae2d_base', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
-                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base'],
+                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base', 'himae_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
 
@@ -62,7 +62,7 @@ def get_args_parser():
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
 
-    parser.add_argument('--mask_ratio', default=0.5, type=float,
+    parser.add_argument('--mask_ratio', default=0.25, type=float,
                         help='Masking ratio (percentage of removed patches).')
 
     parser.add_argument('--norm_pix_loss', action='store_true',
