@@ -14,8 +14,7 @@ from util.metric import calc_metrics
 
 from torch.utils.tensorboard import SummaryWriter
 
-import models_mae_1d
-import models_mae
+import models
 # import util.misc as misc
 
 def get_args_parser():
@@ -24,7 +23,7 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
-                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small'],
+                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small','himae_base'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
@@ -95,9 +94,9 @@ def main(args):
     )
 
     if '1d' not in args.model:
-        model = models_mae.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
+        model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
     else:
-        model = models_mae_1d.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
+        model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
 
     model.to(device)
 
@@ -133,7 +132,7 @@ def main(args):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            _, _, pred, _  = model(samples, ssl_masks, full_samples)
+            pred, _  = model(samples, ssl_masks, full_samples)
 
 
             # Data consistency
