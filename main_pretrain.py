@@ -51,7 +51,7 @@ def get_args_parser():
                         help='Accumulate gradient iterations (for increasing the effective batch size under memory constraints)')
 
     # Model parameters
-    parser.add_argument('--model', default='mae2d_base', type=str, 
+    parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
                                     'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base', 'himae_small'],
@@ -100,6 +100,7 @@ def get_args_parser():
     parser.add_argument('--data_path', default='../../data/', type=str,
                         help='dataset path')
     parser.add_argument('--dataset', default='ixi', choices=['ixi', 'fastmri'])
+    parser.add_argument('--domain', default='kspace', choices=['kspace', 'img'])
 
     # Learning
     parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
@@ -205,12 +206,15 @@ def main(args):
         drop_last=False
     )
     num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
+    in_chans = 2 if args.domain=='kspace' else 1
     # define the model
     if '1d' not in args.model:
         model = models.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             mask_center=args.mask_center, 
                                             num_low_freqs=num_low_freqs,
-                                            divide_loss=args.divide_loss)
+                                            divide_loss=args.divide_loss,
+                                            in_chans=in_chans,
+                                            domain=args.domain)
     else:
         model = models.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
                                             mask_center=args.mask_center, 

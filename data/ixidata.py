@@ -8,7 +8,7 @@ from typing import Sequence
 
 from torch.utils.data import Dataset
 import torchvision.transforms as transforms
-from util.mri_tools import rfft2
+from util.mri_tools import rfft2, rifft2
 
 ''' IXIDataset
 input: img
@@ -27,6 +27,7 @@ class IXIDataset(Dataset):
     def __init__(self, opt, mode='train'):
         self.opt = opt
         self.mode = mode
+        self.domain = opt.domain
 
         #downsample
         self.down = opt.down
@@ -46,19 +47,31 @@ class IXIDataset(Dataset):
     def __getitem__(self, idx):
         with open(self.datalist[idx], 'rb') as f:
             imgdata = pickle.load(f)
-        imgdata = torch.tensor(imgdata).unsqueeze(-1)
+        imgdata = torch.tensor(imgdata).unsqueeze(0)
         imgdata = self.normalize(imgdata)
-        kdata = rfft2(imgdata)
+        kdata = rfft2(imgdata, permute=True)
         kdata = self.scale(kdata)
-        kdata = kdata.permute(2,0,1)
+        #kdata = kdata.permute(2,0,1) #c,h,w
 
         if self.do_downsample:
             down_kdata, mask = self.downsample(kdata) #mask shape: [1,h,1]
             ssl_mask_2d = self.mk_ssl_mask(mask=mask, shape=kdata.shape)
-            return {'down': down_kdata, 'full': kdata, 'mask': ssl_mask_2d}
+            if self.domain=='img':
+                down_img = rifft2(down_kdata, permute=True)
+                down_img = self.normalize(down_img)
+                return {'down': down_img, 'full': imgdata, 'mask': ssl_mask_2d}
+            elif self.domain=='kspace':
+                return {'down': down_kdata, 'full': kdata, 'mask': ssl_mask_2d}
+            else:
+                raise NotImplementedError
         else:
             ssl_mask_2d = self.mk_ssl_mask(shape=kdata.shape)
-            return {'down': kdata, 'full': kdata, 'mask': ssl_mask_2d}
+            if self.domain=='img':
+                return {'down': imgdata, 'full': imgdata, 'mask': ssl_mask_2d}
+            elif self.domain=='kspace':
+                return {'down': kdata, 'full': kdata, 'mask': ssl_mask_2d}
+            else:
+                raise NotImplementedError
 
 
     def normalize(self, arr, eps=1e-08): #[0,1] for spatial domain

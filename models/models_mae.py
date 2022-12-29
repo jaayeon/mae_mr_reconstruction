@@ -19,14 +19,14 @@ import torch.nn as nn
 from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
-from util.mri_tools import rifft2, normalize
+from util.mri_tools import rifft2, rfft2, normalize
 
 
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=256, patch_size=16, in_chans=1,
-                 embed_dim=1024, depth=24, num_heads=16,
+    def __init__(self, domain='kspace', img_size=256, patch_size=16, in_chans=1,
+                 embed_dim=1024, depth=24, num_heads=16, 
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
         super().__init__()
@@ -75,6 +75,8 @@ class MaskedAutoencoderViT(nn.Module):
         self.img_size = img_size
         self.num_low_freqs = num_low_freqs
         self.divide_loss = focal_gaussian() if divide_loss else None
+        self.domain = domain
+        self.in_chans = in_chans
 
         self.initialize_weights()
 
@@ -113,14 +115,13 @@ class MaskedAutoencoderViT(nn.Module):
         imgs: (N, c, H, W)
         x: (N, L, patch_size**2 *c)
         """
-        c=2
         p = self.patch_embed.patch_size[0]
         assert imgs.shape[2] == imgs.shape[3] and imgs.shape[2] % p == 0
 
         h = w = imgs.shape[2] // p
-        x = imgs.reshape(shape=(imgs.shape[0], c, h, p, w, p))
+        x = imgs.reshape(shape=(imgs.shape[0],self.in_chans, h, p, w, p))
         x = torch.einsum('nchpwq->nhwpqc', x)
-        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 * c))
+        x = x.reshape(shape=(imgs.shape[0], h * w, p**2 *self.in_chans))
         return x
 
     def unpatchify(self, x):
@@ -128,14 +129,14 @@ class MaskedAutoencoderViT(nn.Module):
         x: (N, L, patch_size**2 *c)
         imgs: (N, c, H, W)
         """
-        c=2
+
         p = self.patch_embed.patch_size[0]
         h = w = int(x.shape[1]**.5)
         assert h * w == x.shape[1]
         
-        x = x.reshape(shape=(x.shape[0], h, w, p, p, c))
+        x = x.reshape(shape=(x.shape[0], h, w, p, p,self.in_chans))
         x = torch.einsum('nhwpqc->nchpwq', x)
-        imgs = x.reshape(shape=(x.shape[0], c, h * p, h * p))
+        imgs = x.reshape(shape=(x.shape[0],self.in_chans, h * p, h * p))
         return imgs
 
     def random_masking(self, x, mask_ratio, given_ids_shuffle=None):
@@ -332,6 +333,11 @@ class MaskedAutoencoderViT(nn.Module):
             loss = loss.sum() / N  # mean loss on every patches
 
         return loss
+
+    def forward_kspace_loss(self, down, full):
+        N,_,_,_=down.shape
+        kspaceloss = torch.sum(torch.abs(down-full))/N
+        return kspaceloss
     
     def forward_sp_loss(self, pred, full, mask, ssl_masks):
         """
@@ -379,8 +385,34 @@ class MaskedAutoencoderViT(nn.Module):
         imgloss = torch.sum(torch.abs(predimg-fullimg))/N
         return imgloss
 
+    def forward_img(self, imgs, ssl_masks, full, mask_ratio=0.25):
+        latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
+        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+        
+        #dc layer
+        pred1 = self.unpatchify(pred1)
+        predfreq, downfreq, fullfreq  = rfft2(pred1.float(), imgs, full, permute=True)
+        # downfreq, fullfreq  = rfft2(imgs, full, permute=True)
+        absmax = torch.max(torch.abs(downfreq))
+        predfreq = predfreq/absmax*10
+        downfreq = downfreq/absmax*10
+        fullfreq  = fullfreq/absmax*10
+        predfreqdc = downfreq + predfreq*ssl_masks 
 
-    def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
+        #back to img
+        predimg = rifft2(predfreqdc, permute=True)
+        maxnum = torch.max(predimg)
+        minnum = torch.min(predimg)
+        predimg = (predimg-minnum)/(maxnum-minnum+1e-08)
+
+        if self.train and not self.ssl:
+            loss = self.forward_kspace_loss(predfreq, fullfreq) #mask: 0 is keep, 1 is remove
+            imgloss = self.forward_img_loss(predimg, full)
+            return loss, imgloss, torch.tensor([0], device=loss.device), predimg, mask1
+        else: #not train, not ssl
+            return predimg, mask1
+
+    def forward_kspace(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
         
@@ -427,6 +459,13 @@ class MaskedAutoencoderViT(nn.Module):
         else: #not train, not ssl
             return self.unpatchify(pred1), mask1
 
+    def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
+        if self.domain=='img':
+            return self.forward_img(imgs, ssl_masks, full, mask_ratio=mask_ratio)
+        elif self.domain=='kspace':
+            return self.forward_kspace(imgs, ssl_masks, full, mask_ratio=mask_ratio)
+        else:
+            raise NotImplementedError
 
 class ResBlock(nn.Module):
     def __init__(self, n_feats, kernel_size, bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
@@ -470,49 +509,49 @@ class Mlp(nn.Module):
 
 def mae_2d_large_8_1024(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=1024, depth=8, num_heads=16,
+        embed_dim=1024, depth=8, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def mae_2d_base_6_768(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=6, num_heads=12,
+        embed_dim=768, depth=6, num_heads=12,
         decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def mae_2d_small_4_768(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        embed_dim=768, depth=4, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def mae_2d_optim(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=384, depth=4, num_heads=12,
+        embed_dim=384, depth=4, num_heads=12,
         decoder_embed_dim=384, decoder_depth=4, decoder_num_heads=12,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def vit_2d_large_8_1024(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=1024, depth=8, num_heads=16,
+        embed_dim=1024, depth=8, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
 
 def vit_2d_base_6_768(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=6, num_heads=12,
+        embed_dim=768, depth=6, num_heads=12,
         decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
 
 def vit_2d_small_4_768(**kwargs):
     model = MaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        embed_dim=768, depth=4, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
