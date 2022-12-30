@@ -117,6 +117,7 @@ def train_one_epoch(model: torch.nn.Module,
             
 
             log_writer.add_scalar('lr', lr, epoch_1000x)
+        
 
     #lr scheduler
     if args.lr_scheduler=='cosine':
@@ -148,19 +149,21 @@ def valid_one_epoch(model: torch.nn.Module,
         for i, data in enumerate(data_loader):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
-            full_samples = data['full'].to(device, non_blocking=True)
+            full = data['full'].to(device, non_blocking=True)
 
             """ if args.downsample < 2:
                 samples = samples*(mask.to(samples.device))
                 ssl_masks = smasks.to(samples.device) """
 
-            pred, _  = model(samples, ssl_masks, full_samples, mask_ratio=0)
-
-            # Data consistency
-            pred = torch.clamp(pred, min=-1, max=1)
-            pred_dc = samples + pred*ssl_masks
+            pred, _  = model(samples, ssl_masks, full, mask_ratio=0)
             
-            samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True) 
+            if args.domain=='kspace':
+                samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full[0,:,:,:], permute=True) 
+            elif args.domain=='img':
+                samples = samples[0,:,:,:]
+                pred = pred[0,:,:,:]
+                full = full[0,:,:,:]
+                pred_dc = pred
             
             #normalization [0-1]
             max = torch.max(samples)

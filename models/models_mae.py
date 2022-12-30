@@ -449,15 +449,15 @@ class MaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
+            return loss1+loss2, sslloss1+sslloss2, predfreq1, mask1
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
-            #return loss+imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
-            return loss, imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
+            #return loss+imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
         else: #not train, not ssl
-            return self.unpatchify(pred1), mask1
+            return predfreq1, mask1
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         if self.domain=='img':
@@ -466,45 +466,6 @@ class MaskedAutoencoderViT(nn.Module):
             return self.forward_kspace(imgs, ssl_masks, full, mask_ratio=mask_ratio)
         else:
             raise NotImplementedError
-
-class ResBlock(nn.Module):
-    def __init__(self, n_feats, kernel_size, bias=True, bn=False, act=nn.ReLU(True), res_scale=1):
-        super(ResBlock, self).__init__()
-
-        m=[]
-        for i in range(2):
-            m.append(nn.Conv2d(n_feats, n_feats, kernel_size, padding=kernel_size//2, bias=bias))
-            if bn:
-                m.append(nn.BatchNorm2d(n_feats))
-            if i==0:
-                m.append(act)
-        self.body = nn.Sequential(*m)
-        self.res_scale = res_scale
-    
-    def forward(self, x):
-        res = self.body(x).mul(self.res_scale)
-        res += x
-
-        return res
-
-
-class Mlp(nn.Module):
-    def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=nn.GELU, drop=0.):
-        super().__init__()
-        out_features = out_features or in_features
-        hidden_features = hidden_features or in_feautures
-        self.fc1 = nn.Linear(in_features, hidden_features)
-        self.act = act_layer()
-        self.fc2 = nn.Linear(hidden_features, out_features)
-        self.drop = nn.Dropout(drop)
-
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.act(x)
-        x = self.drop(x)
-        x = self.fc2(x)
-        x = self.drop(x)
-        return x
 
 
 def mae_2d_large_8_1024(**kwargs):
