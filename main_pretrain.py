@@ -299,9 +299,9 @@ def main(args):
         )
         valid_log_stats = {**{f'valid_{k}': v.item() for k,v in valid_stats.items()}, 'epoch':epoch,}
 
-        if valid_log_stats['valid_psnr_dc']>best_psnr:
+        if valid_log_stats['valid_psnr']>best_psnr:
             print('Save Best Checkpoint')
-            best_psnr = valid_log_stats['valid_psnr_dc']
+            best_psnr = valid_log_stats['valid_psnr']
             #save
             misc.save_model(
                 args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,

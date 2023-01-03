@@ -60,22 +60,6 @@ def train_one_epoch(model: torch.nn.Module,
         else: 
             sploss, imgloss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
-        """ 
-        # spatial domain loss
-        if args.downsample>1:
-            pred_dc = samples + pred*ssl_masks
-        else:
-            mask = mask.unsqueeze(1).unsqueeze(-1).repeat(1,2,1,256)
-            pred_dc = samples*(1-mask) + pred*mask # 0 is keep, 1 is remove
-
-        pred_dc, full = rifft2(pred_dc[:,:,:,:], full_samples[:,:,:,:], permute=True) 
-        maxnum = torch.max(full)
-        minnum = torch.min(full)
-        pred_dc = (pred_dc-minnum)/(maxnum-minnum+1e-08)
-        full = (full-minnum)/(maxnum-minnum+1e-08)
-        imgloss = torch.sum(torch.abs(pred_dc-full))/samples.shape[0]/256      
-        # imgloss = torch.tensor([0], device=sploss.device)
-        """
         loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss
         loss_value = loss.item()
 
@@ -86,7 +70,6 @@ def train_one_epoch(model: torch.nn.Module,
         loss /= accum_iter
         loss_scaler(loss, optimizer, parameters=model.parameters(),     #clip_grad=1
                     update_grad=(data_iter_step + 1) % accum_iter == 0)
-        
 
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
@@ -114,11 +97,8 @@ def train_one_epoch(model: torch.nn.Module,
             log_writer.add_scalar('train_sploss', sploss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sslloss', sslloss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_imgloss', imgloss_value_reduce, epoch_1000x)
-            
-
             log_writer.add_scalar('lr', lr, epoch_1000x)
         
-
     #lr scheduler
     if args.lr_scheduler=='cosine':
         lr_scheduler.step()
@@ -136,7 +116,7 @@ def valid_one_epoch(model: torch.nn.Module,
                     args=None):
 
     model.train=False
-    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'psnr_dc', 'noise_ssim', 'ssim', 'ssim_dc', 'noise_nmse', 'nmse']
+    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'noise_ssim', 'ssim', 'noise_nmse', 'nmse']
     valid_stats = {k:0 for k in keys}
     vnum = len(data_loader)
 
@@ -158,33 +138,27 @@ def valid_one_epoch(model: torch.nn.Module,
             pred, _  = model(samples, ssl_masks, full, mask_ratio=0)
             
             if args.domain=='kspace':
-                samples, pred, pred_dc, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full[0,:,:,:], permute=True) 
+                samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full[0,:,:,:], permute=True) 
             elif args.domain=='img':
                 samples = samples[0,:,:,:]
                 pred = pred[0,:,:,:]
                 full = full[0,:,:,:]
-                pred_dc = pred
             
             #normalization [0-1]
             max = torch.max(samples)
             min = torch.min(samples)
             samples = torch.clamp((samples-min)/(max-min), min=0, max=1)
             pred = torch.clamp((pred-min)/(max-min), min=0, max=1)
-            pred_dc = torch.clamp((pred_dc-min)/(max-min), min=0, max=1)
             full = torch.clamp((full-min)/(max-min), min=0, max=1)
             
             #calculate psnr, ssim
             stat = calc_metrics(samples.unsqueeze(0), pred.unsqueeze(0), full.unsqueeze(0))
-            stat_dc = calc_metrics(samples.unsqueeze(0), pred_dc.unsqueeze(0), full.unsqueeze(0))
             for k,v in stat.items():
                 valid_stats[k]+=v/vnum
-            valid_stats['psnr_dc'] += stat_dc['psnr']/vnum
-            valid_stats['ssim_dc'] += stat_dc['ssim']/vnum
             
             #image save
             if i%100==0:
-                imageio.imwrite(os.path.join(save_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/100))), torch.cat([samples, pred, pred_dc, full], dim=-1).squeeze().cpu().numpy())
+                imageio.imwrite(os.path.join(save_folder, 'ep{:02d}_concat_{:03d}.tif'.format(epoch, int(i/100))), torch.cat([samples, pred, full], dim=-1).squeeze().cpu().numpy())
 
     print('Validation Epoch: {} {}'.format(epoch, ', '.join(['{}: {:.3f}'.format(k,v.item()) for k,v in valid_stats.items()])))
     return valid_stats
-

@@ -144,6 +144,7 @@ class IXIDataset(Dataset):
     
     def __len__(self):
         return len(self.datalist)
+        # return 1000
 
     '''
     def to_tensor(self, arr: np.ndarray) -> torch.Tensor:

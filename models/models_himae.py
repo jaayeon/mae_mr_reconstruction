@@ -26,7 +26,7 @@ from timm.models.layers import to_2tuple
 class hiMaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, img_size=256, patch_size=16, in_chans=1,
+    def __init__(self, domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=8, stage=1, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
@@ -35,6 +35,7 @@ class hiMaskedAutoencoderViT(nn.Module):
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         dim = embed_dim // 2**(stage-1)
+        inner_patch_size = patch_size//2**(stage-1)
 
         self.patch_embed = PatchEmbed(img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=dim, norm_layer=norm_layer)
         num_patches = self.patch_embed.num_patches
@@ -67,8 +68,16 @@ class hiMaskedAutoencoderViT(nn.Module):
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) # qk_scale=None -> LayerScale=None..?
             for i in range(decoder_depth)])
 
-        self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
+        dim=decoder_embed_dim
+        self.decoder_mblocks = nn.ModuleList()
+        for _ in range(stage-1):
+            self.decoder_mblocks.append(
+                MlpPatchExpand(dim, dim_scale=2, norm_layer=nn.LayerNorm, act_layer=nn.GELU, mlp_ratio=4., drop_path=0.)
+            )
+            dim /= 2
+            dim=int(dim)
+        self.decoder_norm = norm_layer(dim)
+        self.decoder_pred = nn.Linear(dim, inner_patch_size**2 * in_chans, bias=True) # decoder to patch
 
         """ 
         self.predictor = nn.Sequential(nn.Linear(patch_size**2*in_chans, 128, bias=True),
@@ -85,6 +94,8 @@ class hiMaskedAutoencoderViT(nn.Module):
         self.img_size = img_size
         self.num_low_freqs = num_low_freqs
         self.divide_loss = focal_gaussian() if divide_loss else None
+        self.inner_patch_size = inner_patch_size
+        self.in_chans = in_chans
 
         self.initialize_weights()
 
@@ -307,10 +318,21 @@ class hiMaskedAutoencoderViT(nn.Module):
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
 
+        #MlpPatchExpand
+        b,l,c = x.shape
+        x=x.view(b,l,1,1,c)
+        for blk in self.decoder_mblocks:
+            x = blk(x) #b,257,4,4,192
+
         x = self.decoder_norm(x)
 
         # predictor projection
-        x = self.decoder_pred(x)
+        x = self.decoder_pred(x) #b,257,4,4,32
+        b,l,p1,p2,c=x.shape
+        assert self.inner_patch_size**2*self.in_chans==c
+        x = x.reshape(b,l,p1,p2,self.inner_patch_size, self.inner_patch_size, 2)
+        x = x.permute(0,1,2,4,3,5,6)
+        x = x.reshape(b,l,-1)
 
         # remove cls token
         cls = x[:, :1, :]
@@ -441,15 +463,15 @@ class hiMaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
+            return loss1+loss2, sslloss1+sslloss2, predfreq1, mask1
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
             #return loss+imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
-            return loss, imgloss, torch.tensor([0], device=loss.device), self.unpatchify(pred1), mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
         else: #not train, not ssl
-            return self.unpatchify(pred1), mask1
+            return predfreq1, mask1
 
 
 
@@ -470,20 +492,54 @@ class MlpPatchMerge(nn.Module):
 
     def forward(self, x):
         #Mlp
-        x = x + self.drop_path(self.mlp2(self.norm1(x)))
+        x = x + self.drop_path(self.mlp1(self.norm1(x)))
         x = x + self.drop_path(self.mlp2(self.norm2(x)))
         
         #PatchMerge
         x0 = x[..., 0::2, 0::2, :]
-        x1 = x[..., 1::2, 0::2, :]
-        x2 = x[..., 0::2, 1::2, :]
+        x1 = x[..., 0::2, 1::2, :]
+        x2 = x[..., 1::2, 0::2, :]
         x3 = x[..., 1::2, 1::2, :]
 
-        x = torch.cat([x0, x1, x2, x3], dim=-1)
+        x = torch.cat([x0, x1, x2, x3], dim=-1) #x=x.reshape(256,8,2,8,2,2) -> permute(0,1,3,2,4,5) -> reshape(256,8,8,-1) 
         x = self.norm(x)
         x = self.reduction(x)
 
         return x
+
+
+class MlpPatchExpand(nn.Module):
+    def __init__(self, dim, dim_scale=2, norm_layer=nn.LayerNorm, act_layer=nn.GELU, mlp_ratio=4., drop_path=0.):
+        super().__init__()
+        #PatchExpand
+        outdim = int(dim*dim_scale)
+        self.expand = nn.Linear(dim, outdim, bias=False)
+
+        #Mlp
+        expanddim = int(outdim//4)
+        mlp_hidden_features=int(expanddim*mlp_ratio)
+        self.mlp1 = Mlp(in_features=expanddim, hidden_features=mlp_hidden_features, act_layer=act_layer)
+        self.norm1 = norm_layer(expanddim)
+        self.mlp2 = Mlp(in_features=expanddim, hidden_features=mlp_hidden_features, act_layer=act_layer)
+        self.norm2 = norm_layer(expanddim)
+        self.drop_path = DropPath(drop_path) if drop_path > 0 else nn.Identity()
+
+    def forward(self, x):
+        #PatchExpand    
+        x = self.expand(x)
+        B,L,P1,P2,C = x.shape
+        
+        # x = x.rearrange(x, 'b h w (p1 p2 c) -> b (h p1) (w p2) c', p1=2, p2=2, c=C//4)
+        # x = x.view(B,-1, C//4)
+        x = x.reshape(B,L,P1,P2,2,2,C//4).permute(0,1,2,4,3,5,6)
+        x = x.reshape(B,L,2*P1,2*P2,C//4)
+
+        #Mlp
+        x = x + self.drop_path(self.mlp1(self.norm1(x)))
+        x = x + self.drop_path(self.mlp2(self.norm2(x)))
+
+        return x
+
 
 class PatchEmbed(nn.Module):
     def __init__(self, img_size=224, patch_size=16, inner_patches=4, in_chans=3, embed_dim=96, norm_layer=None):
@@ -523,44 +579,44 @@ class PatchEmbed(nn.Module):
 
 def himae_large_8_1024(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=1024, depth=8, stage=3, num_heads=16,
+        embed_dim=1024, depth=8, stage=3, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def himae_base_6_768(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=6, stage=3, num_heads=12,
+        embed_dim=768, depth=6, stage=3, num_heads=12,
         decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 def himae_small_4_768(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=4, stage=3, num_heads=12,
+        embed_dim=768, depth=4, stage=3, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 
 
-def vit_2d_large_8_1024(**kwargs):
+def hivit_2d_large_8_1024(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=1024, depth=8, num_heads=16,
+        embed_dim=1024, depth=8, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
 
-def vit_2d_base_6_768(**kwargs):
+def hivit_2d_base_4_1024(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=6, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
+        embed_dim=1024, depth=4, num_heads=12,
+        decoder_embed_dim=1024, decoder_depth=4, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
 
-def vit_2d_small_4_768(**kwargs):
+def hivit_2d_small_4_768(**kwargs):
     model = hiMaskedAutoencoderViT(
-        in_chans=2, embed_dim=768, depth=4, num_heads=12,
+        embed_dim=768, depth=4, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
     return model
@@ -570,6 +626,6 @@ himae_large = himae_large_8_1024 #decoder: 768 dim, 12 blocks
 himae_base = himae_base_6_768
 himae_small = himae_small_4_768
 
-#vit2d_large = vit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
-#vit2d_base = vit_2d_base_6_768
-#vit2d_small = vit_2d_small_4_768
+vit2d_large = hivit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
+vit2d_base = hivit_2d_base_4_1024
+vit2d_small = hivit_2d_small_4_768
