@@ -43,6 +43,10 @@ class IXIDataset(Dataset):
             self.do_downsample = True if opt.downsample>1 else False
             self.num_low_freqs = int(opt.input_size/opt.downsample*opt.low_freq_ratio) #select 70% from center line
             self.num_high_freqs = int(opt.input_size/opt.downsample)-self.num_low_freqs
+        
+        if self.down == 'random':
+            self._init_random_pattern()
+            
 
     def __getitem__(self, idx):
         with open(self.datalist[idx], 'rb') as f:
@@ -54,7 +58,7 @@ class IXIDataset(Dataset):
         #kdata = kdata.permute(2,0,1) #c,h,w
 
         if self.do_downsample:
-            down_kdata, mask = self.downsample(kdata) #mask shape: [1,h,1]
+            down_kdata, mask = self.downsample(kdata, idx) #mask shape: [1,h,1]
             ssl_mask_2d = self.mk_ssl_mask(mask=mask, shape=kdata.shape)
             if self.domain=='img':
                 down_img = rifft2(down_kdata, permute=True)
@@ -72,7 +76,7 @@ class IXIDataset(Dataset):
                 return {'down': kdata, 'full': kdata, 'mask': ssl_mask_2d}
             else:
                 raise NotImplementedError
-
+    
 
     def normalize(self, arr, eps=1e-08): #[0,1] for spatial domain
         max = torch.max(arr)
@@ -100,7 +104,7 @@ class IXIDataset(Dataset):
         return ssl_mask_2d
 
 
-    def downsample(self, arr):
+    def downsample(self, arr, idx):
         c,h,w=arr.shape
 
         #center_mask
@@ -112,14 +116,7 @@ class IXIDataset(Dataset):
 
         #acceleration mask
         if self.down=='random': 
-            """
-            #have to fix for each data
-
-
-            
-            """
-            prob = self.num_high_freqs/(h-self.num_low_freqs)
-            accel_mask = self.rng.uniform(size=h)<prob
+            accel_mask = self.accel_mask[idx,...]
             accel_mask = self.reshape_mask(accel_mask, arr.shape)
         elif self.down=='uniform':
             adjusted_accel = int((h-self.num_low_freqs)/(self.num_high_freqs))
@@ -132,6 +129,14 @@ class IXIDataset(Dataset):
         downsampled_data = arr*mask+0.0
 
         return downsampled_data, mask
+
+    def _init_random_pattern(self):
+        h = self.opt.input_size
+        b = len(self.datalist)
+        c = 2 if self.opt.domain=='kspace' else 1
+
+        prob = self.num_high_freqs/(h-self.num_low_freqs)
+        self.accel_mask = self.rng.uniform(size=(b,h))<prob
 
 
     def reshape_mask(self, mask:np.ndarray, shape: Sequence[int]) -> torch.Tensor:

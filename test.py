@@ -41,6 +41,7 @@ def get_args_parser():
     parser.add_argument('--data_path', default='../../data/', type=str,
                         help='dataset path')
     parser.add_argument('--dataset', default='ixi', choices=['ixi', 'fastmri'])
+    parser.add_argument('--domain', default='kspace', choices=['kspace', 'img'])
 
     # Learning
     parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
@@ -92,11 +93,8 @@ def main(args):
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
-
-    if '1d' not in args.model:
-        model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
-    else:
-        model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size)
+    in_chans = 2 if args.domain=='kspace' else 1
+    model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size, in_chans=in_chans, domain=args.domain)
 
     model.to(device)
 

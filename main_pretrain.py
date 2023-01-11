@@ -208,19 +208,12 @@ def main(args):
     num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
     in_chans = 2 if args.domain=='kspace' else 1
     # define the model
-    if '1d' not in args.model:
-        model = models.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                            mask_center=args.mask_center, 
-                                            num_low_freqs=num_low_freqs,
-                                            divide_loss=args.divide_loss,
-                                            in_chans=in_chans,
-                                            domain=args.domain)
-    else:
-        model = models.__dict__[args.model](norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
-                                            mask_center=args.mask_center, 
-                                            num_low_freqs=num_low_freqs,
-                                            divide_loss=args.divide_loss)
-
+    model = models.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+                                        mask_center=args.mask_center, 
+                                        num_low_freqs=num_low_freqs,
+                                        divide_loss=args.divide_loss,
+                                        in_chans=in_chans,
+                                        domain=args.domain)
     model.to(device)
 
     model_without_ddp = model
