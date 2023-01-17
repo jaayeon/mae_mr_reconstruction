@@ -73,6 +73,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
 
+    if not os.path.exists('./tests'):
+        os.mkdir('./tests')
     if not os.path.exists(args.output_dir):
         os.mkdir(args.output_dir)
 
