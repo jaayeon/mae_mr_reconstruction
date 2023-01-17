@@ -101,7 +101,14 @@ if __name__ == '__main__':
     print('Start test.. best epoch: {}'.format(checkpoint['epoch']))
 
     model.train=False
-    model.decoder_blocks[-1].attn.forward = forward_wrapper(model.decoder_blocks[-1].attn)
+    model.blocks[0].attn.forward = forward_wrapper(model.blocks[0].attn)
+    model.blocks[1].attn.forward = forward_wrapper(model.blocks[1].attn)
+    model.blocks[2].attn.forward = forward_wrapper(model.blocks[2].attn)
+    model.blocks[3].attn.forward = forward_wrapper(model.blocks[3].attn)
+    model.decoder_blocks[0].attn.forward = forward_wrapper(model.decoder_blocks[0].attn)
+    model.decoder_blocks[1].attn.forward = forward_wrapper(model.decoder_blocks[1].attn)
+    model.decoder_blocks[2].attn.forward = forward_wrapper(model.decoder_blocks[2].attn)
+    model.decoder_blocks[3].attn.forward = forward_wrapper(model.decoder_blocks[3].attn)
 
     with torch.no_grad():
         for i,data in enumerate(data_loader):
@@ -110,6 +117,7 @@ if __name__ == '__main__':
             full_samples = data['full'].to(device, non_blocking=True)
 
             y = model(samples, ssl_masks, full_samples)
+            attn_map = model.decoder_blocks[-1].attn.attn_map.detach()
             attn_map = model.decoder_blocks[-1].attn.attn_map.detach()
             print(attn_map.shape) #1 16 257 257
             # average the attention weights across all heads

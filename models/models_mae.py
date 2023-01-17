@@ -25,7 +25,7 @@ from util.mri_tools import rifft2, rfft2, normalize
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, domain='kspace', img_size=256, patch_size=16, in_chans=1,
+    def __init__(self, patch_direction=None, domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16, 
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):

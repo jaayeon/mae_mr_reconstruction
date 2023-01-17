@@ -22,12 +22,13 @@ from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
 from util.mri_tools import rifft2, rfft2, normalize
 
 class PatchEmbed(nn.Module):
-    def __init__(self, img_size=256, in_chans=2, embed_dim=768):
+    def __init__(self, patch_direction='ro', img_size=256, in_chans=2, embed_dim=768):
         super().__init__()
         """
         imgs: (N, c, H, W) --> (N, H, cxW)
         x: (N, L, D)
         """
+        self.pd = patch_direction
         self.img_size = img_size
         self.in_chans = in_chans
         self.proj = nn.Linear(in_chans*img_size, embed_dim)
@@ -35,8 +36,10 @@ class PatchEmbed(nn.Module):
         self.num_patches = img_size
 
     def forward(self, imgs):
-        # x = torch.einsum('nchw->nhwc', imgs)
-        x = torch.einsum('nchw->nwhc', imgs)
+        if self.pd=='ro':
+            x = torch.einsum('nchw->nhwc', imgs)
+        elif self.pd=='pe':
+            x = torch.einsum('nchw->nwhc', imgs)
         x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
         x = self.proj(x)
         return x
@@ -46,7 +49,7 @@ class PatchEmbed(nn.Module):
 class MaskedAutoencoderViT1d(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, domain='kspace', img_size=256, patch_size=16, in_chans=1,
+    def __init__(self, patch_direction='ro', domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
                  mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
@@ -56,7 +59,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.img_size = img_size
         # --------------------------------------------------------------------------
         # MAE encoder specifics
-        self.patch_embed = PatchEmbed(img_size, in_chans, embed_dim)
+        self.patch_embed = PatchEmbed(patch_direction, img_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -98,6 +101,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.divide_loss = focal_gaussian() if divide_loss else None
         self.domain = domain
         self.in_chans = in_chans
+        self.pd = patch_direction
+        assert self.pd=='ro' or self.pd=='pe'
 
         self.initialize_weights()
 
@@ -136,8 +141,10 @@ class MaskedAutoencoderViT1d(nn.Module):
         imgs: (N, c, H, W) --> (N, H, cxW)
         x: (N, L, D)
         """
-        # x = torch.einsum('nchw->nhwc', imgs)
-        x = torch.einsum('nchw->nwhc', imgs)
+        if self.pd=='ro':
+            x = torch.einsum('nchw->nhwc', imgs)
+        elif self.pd=='pe':
+            x = torch.einsum('nchw->nwhc', imgs)
         x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
         return x
 
@@ -148,8 +155,10 @@ class MaskedAutoencoderViT1d(nn.Module):
         imgs: (N, c, H, W)
         """      
         x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
-        # imgs = torch.einsum('nhwc->nchw', x)
-        imgs = torch.einsum('nwhc->nchw', x)
+        if self.pd=='ro':
+            imgs = torch.einsum('nhwc->nchw', x)
+        elif self.pd=='pe':
+            imgs = torch.einsum('nwhc->nchw', x)
         return imgs
 
     def random_masking(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
@@ -174,8 +183,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
         
-        if torch.sum(ssl_masks) != 0:
-            removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0]
+        if self.pd=='ro' and torch.sum(ssl_masks)!=0:  #downsampled image
+            removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0] #1: unscanned, 0: scanned
             # vit -> x need, mae -> needed.  
             if len_keep+len(removed_index)>L:
                 len_keep = L - len(removed_index)
