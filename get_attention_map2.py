@@ -72,6 +72,7 @@ if __name__ == '__main__':
     parser.add_argument('--resume', default='',
                         help='resume from checkpoint. ex)1023_mae/checkpoint-best.pth')
     parser.add_argument('--save_num', default=100, type=int, help='0 is saving all images, otherwise saving only that number of images')
+    parser.add_argument('--patch_direction', type=str, default='ro', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
     args = parser.parse_args()
 
 
@@ -140,7 +141,10 @@ if __name__ == '__main__':
 
             attn_map = attn_map[:,1:,1:]
             print(attn_map.shape) #8 257 257
-            patch_attn = attn_map.reshape(8,-1,1,16,16).repeat(1,1,3,1,1)
+            if '1d' in args.model:
+                patch_attn = attn_map.reshape(8,-1,1,256).repeat(1,1,1,16,1) #8 256 1 256 256
+            else:
+                patch_attn = attn_map.reshape(8,-1,1,16,16).repeat(1,1,3,1,1)
             print(patch_attn.shape)
             # torchvision.utils.save_image(
             #         torchvision.utils.make_grid(patch_attn, normalize=True, scale_each=True, nrow=16, pad_value=0.5, padding=1), 
@@ -151,8 +155,12 @@ if __name__ == '__main__':
                     os.mkdir(block_dir)
                 for i in range(256):
                     img = patch_attn[j,i,:,:,:]
-                    h=i//16
-                    w=i%16
+                    if '1d' in args.model:
+                        h=0
+                        w=i
+                    else:
+                        h=i//16
+                        w=i%16
                     torchvision.utils.save_image(
                         torchvision.utils.make_grid(torch.clip(img[:,:,:], min=0, max=0.1), normalize=True, scale_each=True), 
                         os.path.join(block_dir, 'attn_block{}_{}x{}.png'.format(j,h,w)))
