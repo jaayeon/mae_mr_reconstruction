@@ -183,6 +183,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
         
+        '''
         if self.pd=='ro' and torch.sum(ssl_masks)!=0:  #downsampled image
             removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0] #1: unscanned, 0: scanned
             # vit -> x need, mae -> needed.  
@@ -191,7 +192,8 @@ class MaskedAutoencoderViT1d(nn.Module):
             
         else:
             removed_index = None
-
+        '''
+        removed_index=None
 
         if given_ids_shuffle is not None:
             ids_shuffle = given_ids_shuffle
