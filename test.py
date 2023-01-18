@@ -30,6 +30,7 @@ def get_args_parser():
     parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
+    parser.add_argument('--patch_direction', type=str, default='readout', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
 
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
@@ -94,7 +95,7 @@ def main(args):
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
     in_chans = 2 if args.domain=='kspace' else 1
-    model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size, in_chans=in_chans, domain=args.domain)
+    model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size, in_chans=in_chans, domain=args.domain, patch_direction=args.patch_direction)
 
     model.to(device)
 
