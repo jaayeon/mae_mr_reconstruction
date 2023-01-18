@@ -117,12 +117,49 @@ if __name__ == '__main__':
             full_samples = data['full'].to(device, non_blocking=True)
 
             y = model(samples, ssl_masks, full_samples)
-            attn_map = model.decoder_blocks[-1].attn.attn_map.detach()
-            attn_map = model.decoder_blocks[-1].attn.attn_map.detach()
-            print(attn_map.shape) #1 16 257 257
+            attn = [] #8x(1,16,257,257)
+            attn.append(model.blocks[0].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.blocks[1].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.blocks[2].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.blocks[3].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.decoder_blocks[0].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.decoder_blocks[1].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.decoder_blocks[2].attn.attn_map.detach().mean(dim=1))
+            attn.append(model.decoder_blocks[3].attn.attn_map.detach().mean(dim=1))
+
+            attn_map = torch.cat(attn, dim=0)
+            # print(attn_map.shape) #8 16 257 257
             # average the attention weights across all heads
-            attn_map = torch.mean(attn_map, dim=1)
-            print(attn_map.shape) #1 257 257
+            # attn_map = torch.mean(attn_map, dim=1) #8,1,257,257
+            print(attn_map.shape) #8 257 257
+
+            #add identity matrix, account for residual connection
+            res_map = torch.eye(attn_map.size(1)).to(args.device)
+            attn_map = res_map+attn_map
+            attn_map = attn_map/attn_map.sum(dim=-1).unsqueeze(-1)
+
+            attn_map = attn_map[:,1:,1:]
+            print(attn_map.shape) #8 257 257
+            patch_attn = attn_map.reshape(8,-1,1,16,16).repeat(1,1,3,1,1)
+            print(patch_attn.shape)
+            # torchvision.utils.save_image(
+            #         torchvision.utils.make_grid(patch_attn, normalize=True, scale_each=True, nrow=16, pad_value=0.5, padding=1), 
+            #         os.path.join(args.output_dir, 'attn.png'))
+            for j in range(8):
+                block_dir = os.path.join(args.output_dir, 'block_{:d}'.format(j+1))
+                if not os.path.exists(block_dir): 
+                    os.mkdir(block_dir)
+                for i in range(256):
+                    img = patch_attn[j,i,:,:,:]
+                    h=i//16
+                    w=i%16
+                    torchvision.utils.save_image(
+                        torchvision.utils.make_grid(torch.clip(img[:,:,:], min=0, max=0.1), normalize=True, scale_each=True), 
+                        os.path.join(block_dir, 'attn_block{}_{}x{}.png'.format(j,h,w)))
+                    # torchvision.utils.save_image(img, os.path.join(args.output_dir, 'attn_patch_{}x{}.png'.format(h,w)))
+            exit()
+
+
 
             #add identity matrix, account for residual connection
             res_map = torch.eye(attn_map.size(1)).to(args.device)

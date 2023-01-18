@@ -121,7 +121,8 @@ if __name__ == '__main__':
             attn_map = res_map+attn_map
             attn_map = attn_map/attn_map.sum(dim=-1).unsqueeze(-1)
 
-            attn_map = attn_map[0,:-1,:-1]
+            # attn_map = attn_map[0,:-1,:-1]
+            attn_map = attn_map[0,1:,1:]
             patch_attn = attn_map.reshape(-1,1,16,16)
             torchvision.utils.save_image(
                     torchvision.utils.make_grid(patch_attn, normalize=True, scale_each=True, nrow=16, pad_value=0.5, padding=1), 
