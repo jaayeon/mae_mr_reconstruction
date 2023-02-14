@@ -216,7 +216,7 @@ def main(args):
                                         divide_loss=args.divide_loss,
                                         in_chans=in_chans,
                                         domain=args.domain,
-                                        patch_direction=args.patch_direction
+                                        patch_direction=args.patch_direction,
                                         guided_attention=args.guided_attention)
     model.to(device)
 
