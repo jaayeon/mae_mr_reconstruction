@@ -214,10 +214,10 @@ class MaskedAutoencoderViT1d(nn.Module):
                 low_ids_shuffle = torch.argsort(low_noise)
                 ids_low_freq = torch.gather(ids_low_freq, dim=0, index=low_ids_shuffle)
                 # only preserve 80% of center in default
-                len_low_keep = int(len(ids_low_freq)*1) #0.8
+                len_low_keep = int(len(ids_low_freq)*0.8) #0.8
                 ids_low_keep = ids_low_freq[:len_low_keep]
 
-                # concat center index to the front & delete duplicated index
+                # concat center index to the front; must included & delete duplicated index
                 _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
                 for i in range(len(ids_low_keep)):
                     _ids_shuffle = _ids_shuffle==(ids_shuffle!=ids_low_keep[i]) # True : not included in ids_low_keep, accumulate the False 

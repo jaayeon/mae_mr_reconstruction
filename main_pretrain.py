@@ -65,6 +65,7 @@ def get_args_parser():
     parser.add_argument('--mask_ratio', default=0.25, type=float,
                         help='Masking ratio (percentage of removed patches).')
     parser.add_argument('--patch_direction', type=str, default='ro', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
+    parser.add_argument('--guided_attention', default=0., type=float, help='ratio of the number of seed. if 0; random attention will be applied')
 
     parser.add_argument('--norm_pix_loss', action='store_true',
                         help='Use (per-patch) normalized pixels as targets for computing loss')
@@ -215,7 +216,8 @@ def main(args):
                                         divide_loss=args.divide_loss,
                                         in_chans=in_chans,
                                         domain=args.domain,
-                                        patch_direction=args.patch_direction)
+                                        patch_direction=args.patch_direction
+                                        guided_attention=args.guided_attention)
     model.to(device)
 
     model_without_ddp = model

@@ -139,25 +139,38 @@ if __name__ == '__main__':
             attn_map = res_map+attn_map
             attn_map = attn_map/attn_map.sum(dim=-1).unsqueeze(-1)
 
-            attn_map = attn_map[:,1:,1:]
-            print(attn_map.shape) #8 257 257
+            #cls_attn_map = attn_map[:,0,1:]
+            attn_map = attn_map[:,:,1:] #8 257 256
+            print(attn_map.shape) 
             if '1d' in args.model:
-                patch_attn = attn_map.reshape(8,-1,1,256).repeat(1,1,1,16,1) #8 256 1 256 256
+                if args.patch_direction == 'pe':
+                    patch_attn = attn_map.reshape(8,-1,1,1,256).repeat(1,1,1,256,1) #8 257 1 16 256
+                elif args.patch_direction == 'ro':
+                    patch_attn = attn_map.reshape(8,-1,1,256,1).repeat(1,1,1,1,256) #8 257 1 256 16
             else:
-                patch_attn = attn_map.reshape(8,-1,1,16,16).repeat(1,1,3,1,1)
+                patch_attn = attn_map.reshape(8,-1,1,16,16).repeat(1,1,3,1,1) #8 257 1 16 16
             print(patch_attn.shape)
             # torchvision.utils.save_image(
             #         torchvision.utils.make_grid(patch_attn, normalize=True, scale_each=True, nrow=16, pad_value=0.5, padding=1), 
             #         os.path.join(args.output_dir, 'attn.png'))
+            for k in range(256):
+                if k==0:
+                    all_atn = patch_attn[:,k,:,:,:]
+                else:
+                    all_atn += patch_attn[:,k+1,:,:,:]
             for j in range(8):
                 block_dir = os.path.join(args.output_dir, 'block_{:d}'.format(j+1))
                 if not os.path.exists(block_dir): 
                     os.mkdir(block_dir)
-                for i in range(256):
+                for i in range(257):
                     img = patch_attn[j,i,:,:,:]
                     if '1d' in args.model:
-                        h=0
-                        w=i
+                        if args.patch_direction == 'pe':
+                            h=0
+                            w=i
+                        elif args.patch_direction == 'ro':
+                            h=i
+                            w=0
                     else:
                         h=i//16
                         w=i%16

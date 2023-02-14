@@ -21,6 +21,24 @@ from timm.models.vision_transformer import PatchEmbed, Block
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
 from util.mri_tools import rifft2, rfft2, normalize
 
+def forward_wrapper(attn_obj):
+    def my_forward(x):
+        B,N,C = x.shape
+        qkv = attn_obj.qkv(x).reshape(B,N,3,attn_obj.num_heads, C//attn_obj.num_heads).permute(2,0,3,1,4)
+        q,k,v = qkv.unbind(0)
+
+        attn = (q @ k.transpose(-2,-1)) * attn_obj.scale
+        attn = attn.softmax(dim=-1)
+        attn = attn_obj.attn_drop(attn)
+        attn_obj.attn_map = attn
+        attn_obj.cls_attn_map = attn[:,:,0,2:]
+
+        x = (attn @ v).transpose(1,2).reshape(B,N,C)
+        x = attn_obj.proj(x)
+        x = attn_obj.proj_drop(x)
+        return x
+    return my_forward
+
 
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
@@ -28,7 +46,7 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, patch_direction=None, domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16, 
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False, guided_attention=0.):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -38,6 +56,8 @@ class MaskedAutoencoderViT(nn.Module):
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
+
+        #Block.attn.forward = forward_wrapper(Block.attn)
 
         self.blocks = nn.ModuleList([
             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) # qk_scale=None -> LayerScale=None..?
@@ -67,6 +87,17 @@ class MaskedAutoencoderViT(nn.Module):
         """
         # --------------------------------------------------------------------------
 
+        self.blocks[0].attn.forward = forward_wrapper(self.blocks[0].attn)
+        self.blocks[1].attn.forward = forward_wrapper(self.blocks[1].attn)
+        self.blocks[2].attn.forward = forward_wrapper(self.blocks[2].attn)
+        self.blocks[3].attn.forward = forward_wrapper(self.blocks[3].attn)
+        self.decoder_blocks[0].attn.forward = forward_wrapper(self.decoder_blocks[0].attn)
+        self.decoder_blocks[1].attn.forward = forward_wrapper(self.decoder_blocks[1].attn)
+        self.decoder_blocks[2].attn.forward = forward_wrapper(self.decoder_blocks[2].attn)
+        self.decoder_blocks[3].attn.forward = forward_wrapper(self.decoder_blocks[3].attn)
+
+
+
         self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
         self.mae = mae
@@ -77,6 +108,11 @@ class MaskedAutoencoderViT(nn.Module):
         self.divide_loss = focal_gaussian() if divide_loss else None
         self.domain = domain
         self.in_chans = in_chans
+
+        self.depth = depth
+        self.decoder_depth = decoder_depth
+        self.masking_ids = None
+        self.guided_attention = guided_attention
 
         self.initialize_weights()
 
@@ -139,6 +175,62 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0],self.in_chans, h * p, h * p))
         return imgs
 
+    def set_guided_masking_index(self, inter=False, mask_ratio=0.25, seed_ratio=0.2):
+
+        def del_redundant(arr):
+            # only preserve the first appeared number
+            arr_unique = torch.unique(arr, sorted=True)
+            arr_idx = (torch.cat([(arr==arr_u).nonzero()[0] for arr_u in arr_unique])).sort()[0]
+            return arr[arr_idx]
+
+        # get attention map
+        attn = []  #8x(b,16,257,257)
+        # for i in range(self.depth):
+        #     attn.append(self.blocks[i].attn.attn_map.detach().mean(dim=1))
+        for i in range(self.decoder_depth):
+            attn.append(self.decoder_blocks[i].attn.attn_map.detach().mean(dim=1)) #ahh,,,masking때문에 L 크기가 256이 아님...
+        N,L,L = attn[-1].shape
+        attn = torch.cat(attn, dim=0) #(4xb,257,257)
+        # add identity matrix, account for residual connection
+        res_attn = torch.eye(attn.size(1)).to(attn.device)
+        attn = attn + res_attn
+        attn = attn/attn.sum(dim=-1).unsqueeze(-1)
+        # batch norm
+        attn = torch.mean(attn, dim=0) #(257,257)
+        attn = attn[:,1:] #(257,256)
+        # without class token
+        len_mask = int((L-1)*mask_ratio)
+
+        # get guided-masking index
+        if inter:
+            '''
+            pick n seeds: (n, 257)
+            in each seeds' attention, pick #4 index with highest attention (n, 4)
+            collect attention index ~#4n
+
+            high n: a large number of seeds, attend only a few hightest patches (mild attention-guided masking)
+            low n: a small number of seeds, attend almost every attended patch (harsh attention-guided masking) 
+            '''
+            len_seed = int(len_mask*seed_ratio)
+            len_each = int((1-seed_ratio)/seed_ratio)
+            seed = torch.randint(1,L,(N*len_seed,)).to(attn.device)
+            ids = torch.gather(attn, dim=0, index=seed.unsqueeze(-1).repeat(1,L-1)) # N*len_seed,256
+            ids = ids.reshape(N,len_seed,L-1)
+            ids = torch.argsort(ids, dim=2, descending=True) # N,len_seed,L-1
+            ids = torch.transpose(ids, 1,2).reshape(N,-1)
+            masking_ids = [del_redundant(ids[i,:])[:len_mask].unsqueeze(0) for i in range(ids.size(0))]
+            masking_ids = torch.cat(masking_ids,0) #N,len_mask
+
+        else:
+            '''
+            class token based attention quiding
+            '''
+            seed = attn[0,:]
+            masking_ids = torch.argsort(seed, descending=True)[:len_mask]
+
+        self.masking_ids = masking_ids
+
+
     def random_masking(self, x, mask_ratio, given_ids_shuffle=None):
         """
         Perform per-sample random masking by per-sample shuffling.
@@ -168,6 +260,27 @@ class MaskedAutoencoderViT(nn.Module):
             ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
             flip_ids_shuffle=None
 
+            '''
+            # same masking patches in the same mini-batch
+            if self.masking_ids is not None:
+                _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
+                for i in range(len(self.masking_ids)):
+                    _ids_shuffle = _ids_shuffle==(ids_shuffle!=self.masking_ids[i]) #True: not included in masking_ids, accumulate the False
+                _ids_shuffle = _ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1) #get True index (N, L-1)
+                _ids_shuffle = torch.gather(ids_shuffle, dim=1, index=_ids_shuffle) # get elements not included in masking_ids
+                ids_shuffle = torch.cat([_ids_shuffle, self.masking_ids.repeat(N,1)], dim=1).type(torch.int64)
+            '''
+
+            # masking according to attention map, remove pairs which have a high attention score
+            if self.masking_ids is not None:
+                _ids_shuffle = torch.ones(ids_shuffle.shape, device=x.device)
+                # different masking index exists in each N
+                for i in range(self.masking_ids.size(1)):
+                    _ids_shuffle = _ids_shuffle==(ids_shuffle!=self.masking_ids[:,i].unsqueeze(-1).repeat(1,L)) 
+                _ids_shuffle = _ids_shuffle.nonzero(as_tuple=True)[1].view(N,-1)
+                _ids_shuffle = torch.gather(ids_shuffle, dim=1, index=_ids_shuffle)
+                ids_shuffle = torch.cat([_ids_shuffle, self.masking_ids], dim=1).type(torch.int64)
+
             if not self.mask_center:
                 # get center mask start index & ending index
                 h=torch.sqrt(torch.tensor(L)) #same as w
@@ -194,6 +307,7 @@ class MaskedAutoencoderViT(nn.Module):
 
 
                 #make pair
+                '''
                 flip_ids_shuffle = torch.flip(ids_shuffle, dims=[1])
                 low_noise = torch.rand(len(ids_low_freq), device=x.device)
                 low_ids_shuffle = torch.argsort(low_noise)
@@ -206,13 +320,14 @@ class MaskedAutoencoderViT(nn.Module):
                 _flip_ids_shuffle=_flip_ids_shuffle.nonzero(as_tuple=True)[1].view(N, -1)
                 _flip_ids_shuffle = torch.gather(flip_ids_shuffle, dim=1, index=_flip_ids_shuffle)
                 flip_ids_shuffle = torch.cat([new_ids_low_keep.repeat(N,1), _flip_ids_shuffle], dim=1).type(torch.int64)
-        
+                '''
+                flip_ids_shuffle=None
 
 
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
         # keep the first subset
-        ids_keep = ids_shuffle[:, :len_keep] #(N, L*0.25)
+        ids_keep = ids_shuffle[:, :len_keep]
         x_masked = torch.gather(x, dim=1, index=ids_keep.unsqueeze(-1).repeat(1, 1, D)) #(N,L*0.75's index,D)
 
         # generate the binary mask: 0 is keep, 1 is remove
@@ -415,6 +530,9 @@ class MaskedAutoencoderViT(nn.Module):
     def forward_kspace(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+
+        if self.train and self.guided_attention:
+            self.set_guided_masking_index(inter=True, mask_ratio=mask_ratio, seed_ratio=self.guided_attention)
         
         #dc layer
         predfreq1 = self.unpatchify(pred1)
