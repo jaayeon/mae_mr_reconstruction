@@ -31,7 +31,6 @@ def get_args_parser():
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--patch_direction', type=str, default='readout', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
-
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')

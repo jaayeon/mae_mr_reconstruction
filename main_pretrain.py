@@ -74,6 +74,7 @@ def get_args_parser():
                         help='make two different augmentation for each data, and calculate self supervised loss')
     parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
     parser.add_argument('--img_weight', type=float, default=0.01, help='weight of img loss in spatial domain')
+    parser.add_argument('--reg_weight', type=float, default=0, help='weight of regularization term')
     parser.add_argument('--divide_loss', action='store_true', 
                         help='to maximize the entropy, to balance the energy, divide exponential term to each pixel loss')
     # Optimizer parameters
@@ -217,7 +218,8 @@ def main(args):
                                         in_chans=in_chans,
                                         domain=args.domain,
                                         patch_direction=args.patch_direction,
-                                        guided_attention=args.guided_attention)
+                                        guided_attention=args.guided_attention,
+                                        regularize_attnmap=args.reg_weight)
     model.to(device)
 
     model_without_ddp = model

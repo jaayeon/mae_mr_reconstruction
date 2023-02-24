@@ -46,7 +46,8 @@ class MaskedAutoencoderViT(nn.Module):
     def __init__(self, patch_direction=None, domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16, 
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False, guided_attention=0.):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, 
+                 num_low_freqs=None, divide_loss=False, guided_attention=0., regularize_attnmap=False):
         super().__init__()
 
         # --------------------------------------------------------------------------
@@ -113,6 +114,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.decoder_depth = decoder_depth
         self.masking_ids = None
         self.guided_attention = guided_attention
+        self.regularize_attnmap = True if regularize_attnmap else False
 
         self.initialize_weights()
 
@@ -175,6 +177,27 @@ class MaskedAutoencoderViT(nn.Module):
         imgs = x.reshape(shape=(x.shape[0],self.in_chans, h * p, h * p))
         return imgs
 
+    def attmap_regularization(self, reguralization='l2'):
+        attn = []
+        for i in range(self.depth):
+            attn.append(self.blocks[i].attn.attn_map.detach().mean(dim=1))
+        N,L,_ = attn[-1].shape
+        attn = torch.cat(attn, dim=0)
+
+        attn_decoder = []
+        for i in range(self.decoder_depth):
+            attn_decoder.append(self.decoder_blocks[i].attn.attn_map.detach().mean(dim=1))
+        Nd,Ld,_ = attn_decoder[-1].shape
+        attn_d = torch.cat(attn_decoder, dim=0)
+
+        # get regularization value
+        if reguralization == 'l2':
+            reg = (torch.sum(attn_d**2)+torch.sum(attn**2))/(self.depth + self.decoder_depth)/N/L
+        else:
+            reg = 0.0
+        return reg
+
+
     def set_guided_masking_index(self, inter=False, mask_ratio=0.25, seed_ratio=0.2):
 
         def del_redundant(arr):
@@ -227,6 +250,7 @@ class MaskedAutoencoderViT(nn.Module):
             '''
             seed = attn[0,:]
             masking_ids = torch.argsort(seed, descending=True)[:len_mask]
+            masking_ids = masking_ids.unsqueeze(0).repeat(N,1)
 
         self.masking_ids = masking_ids
 
@@ -532,7 +556,11 @@ class MaskedAutoencoderViT(nn.Module):
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
 
         if self.train and self.guided_attention:
-            self.set_guided_masking_index(inter=True, mask_ratio=mask_ratio, seed_ratio=self.guided_attention)
+            self.set_guided_masking_index(inter=False, mask_ratio=mask_ratio, seed_ratio=self.guided_attention)
+        if self.train and self.regularize_attnmap:
+            reg = self.attmap_regularization()
+        else: 
+            reg = 0.0
         
         #dc layer
         predfreq1 = self.unpatchify(pred1)
@@ -567,13 +595,13 @@ class MaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, predfreq1, mask1
+            return loss1+loss2, sslloss1+sslloss2, predfreq1, mask1, reg
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
             #return loss+imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
-            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1, reg
         else: #not train, not ssl
             return predfreq1, mask1
 

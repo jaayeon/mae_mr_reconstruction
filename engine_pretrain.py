@@ -56,11 +56,11 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, imgloss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+                sploss, imgloss, sslloss, pred, mask, reg = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
         else: 
-            sploss, imgloss, sslloss, pred, mask = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+            sploss, imgloss, sslloss, pred, mask, reg = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
 
-        loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss
+        loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss + args.reg_weight*reg
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
