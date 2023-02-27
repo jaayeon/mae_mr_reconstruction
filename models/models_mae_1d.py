@@ -21,6 +21,25 @@ from timm.models.vision_transformer import Block
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
 from util.mri_tools import rifft2, rfft2, normalize
 
+def forward_wrapper(attn_obj):
+    def my_forward(x):
+        B,N,C = x.shape
+        qkv = attn_obj.qkv(x).reshape(B,N,3,attn_obj.num_heads, C//attn_obj.num_heads).permute(2,0,3,1,4)
+        q,k,v = qkv.unbind(0)
+
+        attn = (q @ k.transpose(-2,-1)) * attn_obj.scale
+        attn = attn.softmax(dim=-1)
+        attn = attn_obj.attn_drop(attn)
+        attn_obj.attn_map = attn
+        attn_obj.cls_attn_map = attn[:,:,0,2:]
+
+        x = (attn @ v).transpose(1,2).reshape(B,N,C)
+        x = attn_obj.proj(x)
+        x = attn_obj.proj_drop(x)
+        return x
+    return my_forward
+
+
 class PatchEmbed(nn.Module):
     def __init__(self, patch_direction='ro', img_size=256, in_chans=2, embed_dim=768):
         super().__init__()
@@ -52,7 +71,8 @@ class MaskedAutoencoderViT1d(nn.Module):
     def __init__(self, patch_direction='ro', domain='kspace', img_size=256, patch_size=16, in_chans=1,
                  embed_dim=1024, depth=24, num_heads=16,
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, num_low_freqs=None, divide_loss=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, 
+                 num_low_freqs=None, divide_loss=False, guided_attention=0., regularize_attnmap=False):
         super().__init__()
 
         self.in_chans = in_chans
@@ -91,6 +111,15 @@ class MaskedAutoencoderViT1d(nn.Module):
                                         nn.Linear(128, in_chans*img_size))
         # --------------------------------------------------------------------------
 
+        self.blocks[0].attn.forward = forward_wrapper(self.blocks[0].attn)
+        self.blocks[1].attn.forward = forward_wrapper(self.blocks[1].attn)
+        self.blocks[2].attn.forward = forward_wrapper(self.blocks[2].attn)
+        self.blocks[3].attn.forward = forward_wrapper(self.blocks[3].attn)
+        self.decoder_blocks[0].attn.forward = forward_wrapper(self.decoder_blocks[0].attn)
+        self.decoder_blocks[1].attn.forward = forward_wrapper(self.decoder_blocks[1].attn)
+        self.decoder_blocks[2].attn.forward = forward_wrapper(self.decoder_blocks[2].attn)
+        self.decoder_blocks[3].attn.forward = forward_wrapper(self.decoder_blocks[3].attn)
+
         self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
         self.mae = mae
@@ -103,6 +132,11 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.in_chans = in_chans
         self.pd = patch_direction
         assert self.pd=='ro' or self.pd=='pe'
+
+        self.depth = depth
+        self.decoder_depth = decoder_depth
+        self.guided_attention = guided_attention
+        self.regularize_attnmap = True if regularize_attnmap else False
 
         self.initialize_weights()
 
@@ -160,6 +194,27 @@ class MaskedAutoencoderViT1d(nn.Module):
         elif self.pd=='pe':
             imgs = torch.einsum('nwhc->nchw', x)
         return imgs
+
+    def attmap_regularization(self, reguralization='l2'):
+        attn = []
+        for i in range(self.depth):
+            attn.append(self.blocks[i].attn.attn_map.detach().mean(dim=1))
+        N,L,_ = attn[-1].shape
+        attn = torch.cat(attn, dim=0)
+
+        attn_decoder = []
+        for i in range(self.decoder_depth):
+            attn_decoder.append(self.decoder_blocks[i].attn.attn_map.detach().mean(dim=1))
+        Nd,Ld,_ = attn_decoder[-1].shape
+        attn_d = torch.cat(attn_decoder, dim=0)
+
+        # get regularization value
+        if reguralization == 'l2':
+            reg = (torch.sum(attn_d**2)+torch.sum(attn**2))/(self.depth + self.decoder_depth)/N/L
+        else:
+            reg = 0.0
+        return reg
+
 
     def random_masking(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
         """
@@ -422,6 +477,11 @@ class MaskedAutoencoderViT1d(nn.Module):
         latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks)
         pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
 
+        if self.train and self.regularize_attnmap:
+            reg = self.attmap_regularization()
+        else:
+            reg = 0.0
+
         #dc layer
         predfreq1 = self.unpatchify(pred1)
         predfreq1 = imgs + predfreq1*ssl_masks
@@ -456,12 +516,12 @@ class MaskedAutoencoderViT1d(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1
+            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1, reg
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
 
-            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1, reg
         else: #not train, not ssl
             return predfreq1, mask1
 
