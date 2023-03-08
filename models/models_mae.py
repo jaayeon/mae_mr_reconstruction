@@ -88,16 +88,7 @@ class MaskedAutoencoderViT(nn.Module):
         """
         # --------------------------------------------------------------------------
 
-        self.blocks[0].attn.forward = forward_wrapper(self.blocks[0].attn)
-        self.blocks[1].attn.forward = forward_wrapper(self.blocks[1].attn)
-        self.blocks[2].attn.forward = forward_wrapper(self.blocks[2].attn)
-        self.blocks[3].attn.forward = forward_wrapper(self.blocks[3].attn)
-        self.decoder_blocks[0].attn.forward = forward_wrapper(self.decoder_blocks[0].attn)
-        self.decoder_blocks[1].attn.forward = forward_wrapper(self.decoder_blocks[1].attn)
-        self.decoder_blocks[2].attn.forward = forward_wrapper(self.decoder_blocks[2].attn)
-        self.decoder_blocks[3].attn.forward = forward_wrapper(self.decoder_blocks[3].attn)
-
-
+        self.wrap_blocks()
 
         self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
@@ -117,6 +108,18 @@ class MaskedAutoencoderViT(nn.Module):
         self.regularize_attnmap = True if regularize_attnmap else False
 
         self.initialize_weights()
+
+
+    def wrap_blocks(self):
+        self.blocks[0].attn.forward = forward_wrapper(self.blocks[0].attn)
+        self.blocks[1].attn.forward = forward_wrapper(self.blocks[1].attn)
+        self.blocks[2].attn.forward = forward_wrapper(self.blocks[2].attn)
+        self.blocks[3].attn.forward = forward_wrapper(self.blocks[3].attn)
+        self.decoder_blocks[0].attn.forward = forward_wrapper(self.decoder_blocks[0].attn)
+        self.decoder_blocks[1].attn.forward = forward_wrapper(self.decoder_blocks[1].attn)
+        self.decoder_blocks[2].attn.forward = forward_wrapper(self.decoder_blocks[2].attn)
+        self.decoder_blocks[3].attn.forward = forward_wrapper(self.decoder_blocks[3].attn)
+
 
     def initialize_weights(self):
         # initialization

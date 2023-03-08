@@ -1,25 +1,13 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-# --------------------------------------------------------
-# References:
-# timm: https://github.com/rwightman/pytorch-image-models/tree/master/timm
-# DeiT: https://github.com/facebookresearch/deit
-# --------------------------------------------------------
-
-from cgi import print_arguments
 from functools import partial
 
-import math
 import torch
 import torch.nn as nn
 
-from timm.models.vision_transformer import Block
+from timm.models.vision_transformer import Block #, PatchEmbed
 
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
 from util.mri_tools import rifft2, rfft2, normalize
+
 
 def forward_wrapper(attn_obj):
     def my_forward(x):
@@ -38,30 +26,6 @@ def forward_wrapper(attn_obj):
         x = attn_obj.proj_drop(x)
         return x
     return my_forward
-
-
-class PatchEmbed(nn.Module):
-    def __init__(self, patch_direction='ro', img_size=256, in_chans=2, embed_dim=768):
-        super().__init__()
-        """
-        imgs: (N, c, H, W) --> (N, H, cxW)
-        x: (N, L, D)
-        """
-        self.pd = patch_direction
-        self.img_size = img_size
-        self.in_chans = in_chans
-        self.proj = nn.Linear(in_chans*img_size, embed_dim)
-
-        self.num_patches = img_size
-
-    def forward(self, imgs):
-        if self.pd=='ro':
-            x = torch.einsum('nchw->nhwc', imgs)
-        elif self.pd=='pe':
-            x = torch.einsum('nchw->nwhc', imgs)
-        x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
-        x = self.proj(x)
-        return x
 
 
 class PosCNN(nn.Module):
@@ -83,28 +47,57 @@ class PosCNN(nn.Module):
 
     def no_weight_decay(self):
         return ['proj.%d.weight' % i for i in range(4)]
+    
 
+class PatchEmbed(nn.Module):
+    def __init__(self, img_size=256, in_chans=2, embed_dim=768, patch_size=16):
+        super().__init__()
+        """
+        imgs: (N, c, H, W) --> (N, H, cxW)
+        x: (N, L, D)
+        """
+        self.img_size = img_size
+        self.in_chans = in_chans
+        self.proj1d = nn.Linear(in_chans*img_size, embed_dim)
+        self.proj2d = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=True)
+        self.num_patches = img_size
 
-
-class MaskedAutoencoderViT1d(nn.Module):
+    def forward(self, imgs, patch_direction='ro'):
+        if patch_direction=='ro':
+            x = torch.einsum('nchw->nhwc', imgs)
+            x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
+            x = self.proj1d(x)
+        elif patch_direction=='pe':
+            x = torch.einsum('nchw->nwhc', imgs)
+            x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
+            x = self.proj1d(x)
+        elif patch_direction=='2d':
+            x = self.proj2d(x)
+            x = x.flatten(2).transpose(1,2)
+            
+        return x
+        
+        
+class AltMaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
     """
-    def __init__(self, patch_direction='ro', domain='kspace', img_size=256, patch_size=16, in_chans=1,
-                 embed_dim=1024, depth=24, num_heads=16,
+    def __init__(self, patch_direction=['pe','ro','2d'], domain='kspace', img_size=256, patch_size=16, in_chans=1,
+                 embed_dim=1024, depth=24, num_heads=16, 
                  decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, norm_pix_loss=False, ssl=False, mask_center=False, 
-                 num_low_freqs=None, divide_loss=False, guided_attention=0., regularize_attnmap=False):
+                 mlp_ratio=4., norm_layer=nn.LayerNorm, mae=True, ssl=False, mask_center=False, 
+                 num_low_freqs=None, guided_attention=0., regularize_attnmap=False):
         super().__init__()
+        # patch_direction: ['pe','ro'], ['pe','ro','2d'], ['pe','2d']
 
-        self.in_chans = in_chans
-        self.img_size = img_size
         # --------------------------------------------------------------------------
         # MAE encoder specifics
-        self.patch_embed = PatchEmbed(patch_direction, img_size, in_chans, embed_dim)
+        self.patch_embed = PatchEmbed(img_size, in_chans, embed_dim, patch_size)
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
+
+        #Block.attn.forward = forward_wrapper(Block.attn)
 
         self.blocks = nn.ModuleList([
             Block(embed_dim, num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) # qk_scale=None -> LayerScale=None..?
@@ -125,27 +118,21 @@ class MaskedAutoencoderViT1d(nn.Module):
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, in_chans*img_size, bias=True) # decoder to patch
+        self.decoder_pred = nn.Linear(decoder_embed_dim, patch_size**2 * in_chans, bias=True) # decoder to patch
 
-        self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
-                                        nn.GELU(),
-                                        nn.Linear(128, in_chans*img_size))
         # --------------------------------------------------------------------------
 
         self.wrap_blocks()
 
-        self.norm_pix_loss = norm_pix_loss
         self.ssl = ssl
         self.mae = mae
         self.mask_center = mask_center
         self.train = True
         self.img_size = img_size
         self.num_low_freqs = num_low_freqs
-        self.divide_loss = focal_gaussian() if divide_loss else None
         self.domain = domain
         self.in_chans = in_chans
-        self.pd = patch_direction
-        assert self.pd=='ro' or self.pd=='pe'
+        self.patch_direction = patch_direction
 
         self.depth = depth
         self.decoder_depth = decoder_depth
@@ -165,6 +152,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.decoder_blocks[2].attn.forward = forward_wrapper(self.decoder_blocks[2].attn)
         self.decoder_blocks[3].attn.forward = forward_wrapper(self.decoder_blocks[3].attn)
 
+
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
@@ -175,8 +163,10 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-        w = self.patch_embed.proj.weight.data
-        torch.nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
+        w1 = self.patch_embed.proj1d.weight.data
+        w2 = self.patch_embed.proj2d.weight.data
+        torch.nn.init.xavier_uniform_(w1.view([w1.shape[0], -1]))
+        torch.nn.init.xavier_uniform_(w2.view([w2.shape[0], -1]))
 
         # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
         torch.nn.init.normal_(self.cls_token, std=.02)
@@ -184,6 +174,7 @@ class MaskedAutoencoderViT1d(nn.Module):
 
         # initialize nn.Linear and nn.LayerNorm
         self.apply(self._init_weights)
+
 
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -195,30 +186,47 @@ class MaskedAutoencoderViT1d(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    def patchify(self, imgs):
+
+    def patchify(self, imgs, patch_direction='ro'):
         """
         imgs: (N, c, H, W) --> (N, H, cxW)
         x: (N, L, D)
         """
-        if self.pd=='ro':
+        if patch_direction=='ro':
             x = torch.einsum('nchw->nhwc', imgs)
-        elif self.pd=='pe':
+        elif patch_direction=='pe':
             x = torch.einsum('nchw->nwhc', imgs)
+        elif patch_direction=='2d':
+            p = self.patch_embed.patch_size[0]
+            h=w=imgs.shape[2]//p
+            x = imgs.reshape(shape=(imgs.shape[0], self.in_chans, h, p, w, p))
+            x = torch.einsum('nchpwq->nhwpqc', imgs)
+
         x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
         return x
 
 
-    def unpatchify(self, x):
+    def unpatchify(self, x, patch_direction='ro'):
         """
         x: (N, H, cxW)
         imgs: (N, c, H, W)
         """      
-        x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
-        if self.pd=='ro':
+        if patch_direction=='ro':
+            x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
             imgs = torch.einsum('nhwc->nchw', x)
-        elif self.pd=='pe':
+        elif patch_direction=='pe':
+            x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
             imgs = torch.einsum('nwhc->nchw', x)
+        elif patch_direction=='2d':
+            p = self.patch_embed.patch_size[0]
+            h=w=int(x.shape[1]**.5)
+            assert h*w == x.shape[1]
+            x = x.reshape(shape=(x.shape[0], h, w, p, p, self.in_chans))
+            x = torch.einsum('nhwpqc->nchpwq', x)
+            imgs = x.reshape(shape=(x.shape[0], self.in_chans, h*p, w*p))
+        
         return imgs
+
 
     def attmap_regularization(self, reguralization='l2'):
         attn = []
@@ -240,7 +248,7 @@ class MaskedAutoencoderViT1d(nn.Module):
             reg = 0.0
         return reg
 
-
+    
     def random_masking(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
         """
         Perform per-sample random masking by per-sample shuffling.
@@ -262,26 +270,15 @@ class MaskedAutoencoderViT1d(nn.Module):
         len_keep = int(L * (1 - mask_ratio))
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
-        
-        '''
-        if self.pd=='ro' and torch.sum(ssl_masks)!=0:  #downsampled image
-            removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0] #1: unscanned, 0: scanned
-            # vit -> x need, mae -> needed.  
-            if len_keep+len(removed_index)>L:
-                len_keep = L - len(removed_index)
-            
-        else:
-            removed_index = None
-        '''
         removed_index=None
 
         if given_ids_shuffle is not None:
             ids_shuffle = given_ids_shuffle
-            flip_ids_shuffle = None
         else:
             # sort noise for each sample
             ids_shuffle = torch.argsort(noise, dim=1)  # ascend: small is keep, large is remove
 
+            # if mask_center==False
             if not self.mask_center:
                 # get center mask start index & ending index
                 start = int((L-self.num_low_freqs)/2)
@@ -329,7 +326,6 @@ class MaskedAutoencoderViT1d(nn.Module):
             _flip_ids_shuffle = torch.gather(flip_ids_shuffle, dim=1, index=_flip_ids_shuffle)
             flip_ids_shuffle = torch.cat([new_ids_low_keep.repeat(N,1), _flip_ids_shuffle], dim=1).type(torch.int64)
             """
-            flip_ids_shuffle=None
 
 
         ids_restore = torch.argsort(ids_shuffle, dim=1)
@@ -344,12 +340,12 @@ class MaskedAutoencoderViT1d(nn.Module):
         # unshuffle to get the binary mask
         mask = torch.gather(mask, dim=1, index=ids_restore) #(N,L)
 
-        # return x_masked, mask, ids_restore, flip_ids_shuffle
         return x_masked, mask, ids_restore, ids_shuffle
 
-    def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
+
+    def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None, patch_direction='pe'):
         # embed patches
-        x = self.patch_embed(x)
+        x = self.patch_embed(x, patch_direction=patch_direction)
 
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
@@ -373,7 +369,6 @@ class MaskedAutoencoderViT1d(nn.Module):
         x = self.norm(x)
 
         return x, mask, ids_restore, pair_ids
-
 
 
     def forward_decoder(self, x, ids_restore):
@@ -419,6 +414,7 @@ class MaskedAutoencoderViT1d(nn.Module):
 
         return x
 
+    
     def forward_loss(self, imgs, pred, mask, ssl_masks, full=None):
         """
         imgs: [N, 2, H, W]
@@ -435,18 +431,22 @@ class MaskedAutoencoderViT1d(nn.Module):
             target = self.patchify(full)
         else:
             target = self.patchify(imgs)
+        '''
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
             target = (target - mean) / (var + 1.e-6)**.5
+        '''
 
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
         if self.ssl: # calculate loss in only acquired data 
             loss = loss*sp_masks
+        '''
         if self.divide_loss is not None:
             divide_loss = self.patchify(self.divide_loss)
             loss = loss*divide_loss.to(loss.device)
+        '''
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         if self.ssl:
@@ -455,37 +455,6 @@ class MaskedAutoencoderViT1d(nn.Module):
             loss = loss.sum() / N  # mean loss on every patches
         
         return loss
-
-    def forward_loss_latent(self, latent1, latent2, ssl_masks): #0 is keep, 1 is remove
-        N,L1,_ = latent1.shape
-        latent1 = latent1[:,1:,:]
-        latent2 = latent2[:,1:,:]
-        mask = ssl_masks[:,0,:,:].squeeze() # N,c,h,w --> N,h,w
-        mask = mask[:,:,0].unsqueeze(-1)
-
-        loss = torch.abs(latent1-latent2)
-        # print(loss.shape, mask.shape)
-        loss = loss*mask
-        loss = loss.mean(dim=-1)
-        loss = loss.sum() / N
-
-        return loss
-
-    def forward_ssl_loss(self, pred1, pred2, mask1, mask2, ssl_masks):
-        N,L,_ = pred1.shape
-        ssl_masks = self.patchify(ssl_masks)
-
-        sslloss = torch.abs(pred1-pred2)
-        sslloss = sslloss*ssl_masks
-        if self.divide_loss is not None:
-            divide_loss = self.patchify(self.divide_loss)
-            sslloss = sslloss*divide_loss.to(sslloss.device)
-        sslloss = sslloss.mean(dim=-1)
-        # cmask = mask1*mask2
-        # sslloss = (sslloss*cmask).sum() / cmask.sum() #only calculate in common masks
-        sslloss = sslloss.sum()/N
-
-        return sslloss
 
     def forward_kspace_loss(self, down, full):
         N,_,_,_=down.shape
@@ -497,21 +466,22 @@ class MaskedAutoencoderViT1d(nn.Module):
         imgloss = torch.sum(torch.abs(predimg-fullimg))/N
         return imgloss
 
-
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
-        latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks)
-        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
 
+        for pd in self.patch_direction:
+            latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks, patch_direction=pd)
+            pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+            #dc layer
+            predfreq1 = self.unpatchify(pred1)
+            predfreq1 = imgs + predfreq1*ssl_masks
+        
+        # attention map regularization
         if self.train and self.regularize_attnmap:
-            reg = self.attmap_regularization()
+                reg = self.attmap_regularization()
         else:
             reg = 0.0
 
-        #dc layer
-        predfreq1 = self.unpatchify(pred1)
-        predfreq1 = imgs + predfreq1*ssl_masks
-
-        #ifft
+        # ifft
         predimg1, fullimg = rifft2(predfreq1, full, permute=True)
         maxnum = torch.max(fullimg)
         minnum = torch.min(fullimg)
@@ -551,84 +521,22 @@ class MaskedAutoencoderViT1d(nn.Module):
             return predfreq1, mask1
 
 
-
-def mae_1d_large_8_1024(**kwargs):
-    model = MaskedAutoencoderViT1d(
+def mae_alt_small_4_768(**kwargs):
+    model = AltMaskedAutoencoderViT(
         embed_dim=1024, depth=8, num_heads=16,
         decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
+    )
     return model
 
-def mae_1d_base_6_768(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        embed_dim=768, depth=6, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def mae_1d_small_4_768(**kwargs):
-    model = MaskedAutoencoderViT1d(
+def vit_alt_small_4_768(**kwargs):
+    model = AltMaskedAutoencoderViT(
         embed_dim=768, depth=4, num_heads=12,
         decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-def vit_1d_large_8_1024(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        embed_dim=1024, depth=8, num_heads=16,
-        decoder_embed_dim=1024, decoder_depth=8, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
-    return model
-
-def vit_1d_base_6_768(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        embed_dim=768, depth=6, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=6, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
-    return model
-
-def vit_1d_small_4_768(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        embed_dim=768, depth=4, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs)
-    return model
-
-'''
-def mae_vit_1d_base_patch16_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        patch_size=16, embed_dim=768, depth=12, num_heads=12,
-        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
+        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs
+    )
     return model
 
 
-def mae_vit_1d_large_patch16_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        patch_size=16, embed_dim=1024, depth=24, num_heads=16,
-        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-
-
-def mae_vit_1d_huge_patch14_dec512d8b(**kwargs):
-    model = MaskedAutoencoderViT1d(
-        patch_size=14, embed_dim=1280, depth=32, num_heads=16,
-        decoder_embed_dim=512, decoder_depth=8, decoder_num_heads=16,
-        mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    return model
-'''
-
-# set recommended archs
-'''
-mae_vit_1d_base_patch16 = mae_vit_1d_base_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_1d_large_patch16 = mae_vit_1d_large_patch16_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_1d_huge_patch14 = mae_vit_1d_huge_patch14_dec512d8b  # decoder: 512 dim, 8 blocks
-mae_vit_1d_base_patch16_uniform = mae_vit_1d_base_patch16_uniform_dec768d12b #decoder: 768 dim, 12 blocks
-'''
-mae1d_large = mae_1d_large_8_1024
-mae1d_base = mae_1d_base_6_768
-mae1d_small =  mae_1d_small_4_768
-vit1d_large = vit_1d_large_8_1024
-vit1d_base = vit_1d_base_6_768
-vit1d_small =  vit_1d_small_4_768
+mae_alt_small = mae_alt_small_4_768
+vit_alt_small = vit_alt_small_4_768

@@ -54,7 +54,8 @@ def get_args_parser():
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
-                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base', 'himae_small'],
+                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base', 'himae_small',
+                                    'mae_alt_small', 'vit_alt_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
 
@@ -64,7 +65,7 @@ def get_args_parser():
 
     parser.add_argument('--mask_ratio', default=0.25, type=float,
                         help='Masking ratio (percentage of removed patches).')
-    parser.add_argument('--patch_direction', type=str, default='ro', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
+    parser.add_argument('--patch_direction', type=str, nargs='+', default='ro', choices=['ro', 'pe', '2d'], help='1D patch direction: readout or phase-encoding')
     parser.add_argument('--guided_attention', default=0., type=float, help='ratio of the number of seed. if 0; random attention will be applied')
 
     parser.add_argument('--norm_pix_loss', action='store_true',
@@ -211,10 +212,12 @@ def main(args):
     num_low_freqs = 44 if dataset_valid.num_low_freqs>44 else dataset_valid.num_low_freqs
     in_chans = 2 if args.domain=='kspace' else 1
     # define the model
-    model = models.__dict__[args.model](patch_size=args.patch_size, norm_pix_loss=args.norm_pix_loss, ssl=args.ssl, 
+    model = models.__dict__[args.model](patch_size=args.patch_size, 
+                                        #norm_pix_loss=args.norm_pix_loss, 
+                                        ssl=args.ssl, 
                                         mask_center=args.mask_center, 
                                         num_low_freqs=num_low_freqs,
-                                        divide_loss=args.divide_loss,
+                                        #divide_loss=args.divide_loss,
                                         in_chans=in_chans,
                                         domain=args.domain,
                                         patch_direction=args.patch_direction,
