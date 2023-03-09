@@ -23,14 +23,15 @@ def get_args_parser():
     # Model parameters
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
-                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small','himae_base','himae_small'],
+                                    'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small','himae_base','himae_small',
+                                    'vit_alt_small', 'mae_alt_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--input_size', default=256, type=int, #default 224
                         help='images input size')
     parser.add_argument('--patch_size', default=16, type=int)
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
-    parser.add_argument('--patch_direction', type=str, default='readout', choices=['ro', 'pe'], help='1D patch direction: readout or phase-encoding')
+    parser.add_argument('--patch_direction', type=str, nargs='+', default='ro', choices=['ro', 'pe', '2d'], help='1D patch direction: readout or phase-encoding')
     # Data Preprocessing
     parser.add_argument('--down', default='uniform', choices=['uniform', 'random'], 
                         help='method of constructing undersampled data')

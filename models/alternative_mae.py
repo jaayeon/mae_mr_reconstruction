@@ -29,25 +29,41 @@ def forward_wrapper(attn_obj):
 
 
 class PosCNN(nn.Module):
-    def __init__(self, in_chans, embed_dim=768, s=1):
+    def __init__(self, in_chans, patch_size=16, embed_dim=768, s=1):
         super(PosCNN, self).__init__()
-        self.proj = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 3, s, 1, bias=True, groups=embed_dim), )
+        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 27, s, 13, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
+        self.proj1d = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
         self.s = s
+        self.patch_size = patch_size
+        self.num_patches = 256
 
-    def forward(self, x, H, W):
+    def forward(self, x, patch_direction='ro'):
         B, N, C = x.shape
-        feat_token = x
-        cnn_feat = feat_token.transpose(1, 2).view(B, C, H, W)
-        if self.s == 1:
-            x = self.proj(cnn_feat) + cnn_feat
+        H, W = int(N**0.5)
+        assert N==H*W
+
+        # cls_token = x[:,:1,:]
+        feat_token = x[:,:,:] # if cls included, x[:,1:,:]
+        if patch_direction=='2d':
+            cnn_feat = feat_token.transpose(1, 2).view(B, C, H, W)
+            cnn_feat = self.proj2d(cnn_feat)
+            cnn_feat = cnn_feat.flatten(2).transpose(1, 2)
         else:
-            x = self.proj(cnn_feat)
-        x = x.flatten(2).transpose(1, 2)
+            cnn_feat = feat_token.transpose(1, 2) # B,C,N
+            cnn_feat = self.proj1d(cnn_feat)
+            cnn_feat = cnn_feat.transpose(1,2)
+
+        if self.s == 1:
+            x = cnn_feat + feat_token
+        else:
+            x = cnn_feat
+        
+        # x = torch.cat((cls_token,x), dim=1)
         return x
 
     def no_weight_decay(self):
         return ['proj.%d.weight' % i for i in range(4)]
-    
+
 
 class PatchEmbed(nn.Module):
     def __init__(self, img_size=256, in_chans=2, embed_dim=768, patch_size=16):
@@ -61,6 +77,7 @@ class PatchEmbed(nn.Module):
         self.proj1d = nn.Linear(in_chans*img_size, embed_dim)
         self.proj2d = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=True)
         self.num_patches = img_size
+        self.patch_size = patch_size
 
     def forward(self, imgs, patch_direction='ro'):
         if patch_direction=='ro':
@@ -72,7 +89,7 @@ class PatchEmbed(nn.Module):
             x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
             x = self.proj1d(x)
         elif patch_direction=='2d':
-            x = self.proj2d(x)
+            x = self.proj2d(imgs)
             x = x.flatten(2).transpose(1,2)
             
         return x
@@ -88,14 +105,18 @@ class AltMaskedAutoencoderViT(nn.Module):
                  num_low_freqs=None, guided_attention=0., regularize_attnmap=False):
         super().__init__()
         # patch_direction: ['pe','ro'], ['pe','ro','2d'], ['pe','2d']
-
+        self.pos_embed_type='conditional' #'absolute'
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.patch_embed = PatchEmbed(img_size, in_chans, embed_dim, patch_size)
+
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        if self.pos_embed_type == 'conditional':
+            self.pos_embed = PosCNN(in_chans)
+        elif self.pos_embed_type == 'absolute':
+            self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
         #Block.attn.forward = forward_wrapper(Block.attn)
 
@@ -111,7 +132,10 @@ class AltMaskedAutoencoderViT(nn.Module):
 
         self.mask_token = nn.Parameter(torch.zeros(1, 1, decoder_embed_dim))
 
-        self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        if self.pos_embed_type == 'absolute':
+            self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
+        elif self.pos_embed_type == 'conditional':
+            self.decoder_pos_embed = PosCNN(in_chans)
 
         self.decoder_blocks = nn.ModuleList([
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) # qk_scale=None -> LayerScale=None..?
@@ -156,17 +180,18 @@ class AltMaskedAutoencoderViT(nn.Module):
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
+        if self.pos_embed_type =='absolute':
+            pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+            self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
-        self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
+            decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+            self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
-        # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
-        w1 = self.patch_embed.proj1d.weight.data
-        w2 = self.patch_embed.proj2d.weight.data
-        torch.nn.init.xavier_uniform_(w1.view([w1.shape[0], -1]))
-        torch.nn.init.xavier_uniform_(w2.view([w2.shape[0], -1]))
+            # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
+            w1 = self.patch_embed.proj1d.weight.data
+            w2 = self.patch_embed.proj2d.weight.data
+            torch.nn.init.xavier_uniform_(w1.view([w1.shape[0], -1]))
+            torch.nn.init.xavier_uniform_(w2.view([w2.shape[0], -1]))
 
         # timm's trunc_normal_(std=.02) is effectively normal_(std=0.02) as cutoff is too big (2.)
         torch.nn.init.normal_(self.cls_token, std=.02)
@@ -348,7 +373,10 @@ class AltMaskedAutoencoderViT(nn.Module):
         x = self.patch_embed(x, patch_direction=patch_direction)
 
         # add pos embed w/o cls token
-        x = x + self.pos_embed[:, 1:, :]
+        if self.pos_embed_type=='absolute':
+            x = x + self.pos_embed[:, 1:, :]
+        elif self.pos_embed_type=='conditional':
+            x = self.pos_embed(x)
 
         # masking: length -> length * mask_ratio
         if self.train and self.mae:
@@ -359,13 +387,15 @@ class AltMaskedAutoencoderViT(nn.Module):
             pair_ids = None
 
         # append cls token
-        cls_token = self.cls_token + self.pos_embed[:, :1, :]
+        if self.pos_embed_type=='absolute':
+            cls_token = self.cls_token + self.pos_embed[:, :1, :]
         cls_tokens = cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
 
         # apply Transformer blocks
         for blk in self.blocks:
             x = blk(x)
+
         x = self.norm(x)
 
         return x, mask, ids_restore, pair_ids
@@ -383,7 +413,11 @@ class AltMaskedAutoencoderViT(nn.Module):
             x = torch.cat([x[:, :1, :], x_], dim=1)  # append cls token
 
         # add pos embed
-        x = x + self.decoder_pos_embed
+        if self.pos_embed_type=='absolute':
+            x = x + self.decoder_pos_embed
+        elif self.pos_embed_type == 'conditional':
+            x = self.decoder_pos_embed(x)
+
         if not torch.isfinite(x).all():
             print('anomaly detected d1')
 
@@ -415,7 +449,7 @@ class AltMaskedAutoencoderViT(nn.Module):
         return x
 
     
-    def forward_loss(self, imgs, pred, mask, ssl_masks, full=None):
+    def forward_loss(self, imgs, pred, mask, ssl_masks, full=None, patch_direction='ro'):
         """
         imgs: [N, 2, H, W]
         pred: [N, L, p*p*2]
@@ -426,11 +460,11 @@ class AltMaskedAutoencoderViT(nn.Module):
         N,L,_=pred.shape
 
         sp_masks = 1-ssl_masks
-        sp_masks = self.patchify(sp_masks)
+        sp_masks = self.patchify(sp_masks, patch_direction=patch_direction)
         if full is not None:
-            target = self.patchify(full)
+            target = self.patchify(full, patch_direction=patch_direction)
         else:
-            target = self.patchify(imgs)
+            target = self.patchify(imgs, patch_direction=patch_direction)
         '''
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
@@ -472,7 +506,7 @@ class AltMaskedAutoencoderViT(nn.Module):
             latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks, patch_direction=pd)
             pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
             #dc layer
-            predfreq1 = self.unpatchify(pred1)
+            predfreq1 = self.unpatchify(pred1, patch_direction=pd)
             predfreq1 = imgs + predfreq1*ssl_masks
         
         # attention map regularization
@@ -507,13 +541,13 @@ class AltMaskedAutoencoderViT(nn.Module):
             pass
 
         if self.train and self.ssl:
-            loss1 = self.forward_loss(imgs, pred1, mask1, ssl_masks) #mask: 0 is keep, 1 is remove
-            loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
+            loss1 = self.forward_loss(imgs, pred1, mask1, ssl_masks, patch_direction=pd) #mask: 0 is keep, 1 is remove
+            loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks, patch_direction=pd) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1), mask1, reg
+            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1, patch_direction=pd), mask1, reg
         elif self.train and not self.ssl:
-            loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
+            loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full, patch_direction=pd) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
 
             return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1, reg
