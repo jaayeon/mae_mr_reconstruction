@@ -34,7 +34,7 @@ class PosCNN(nn.Module):
         self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 27, s, 13, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
         self.proj1d = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
         self.s = s
-        self.patch_size = patch_size
+        self.patch_size = [patch_size, patch_size]
         self.num_patches = 256
 
     def forward(self, x, patch_direction='ro'):
@@ -77,7 +77,7 @@ class PatchEmbed(nn.Module):
         self.proj1d = nn.Linear(in_chans*img_size, embed_dim)
         self.proj2d = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=True)
         self.num_patches = img_size
-        self.patch_size = patch_size
+        self.patch_size = [patch_size, patch_size]
 
     def forward(self, imgs, patch_direction='ro'):
         if patch_direction=='ro':
@@ -105,7 +105,7 @@ class AltMaskedAutoencoderViT(nn.Module):
                  num_low_freqs=None, guided_attention=0., regularize_attnmap=False):
         super().__init__()
         # patch_direction: ['pe','ro'], ['pe','ro','2d'], ['pe','2d']
-        self.pos_embed_type='conditional' #'absolute'
+        self.pos_embed_type='absolute' #'absolute'
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.patch_embed = PatchEmbed(img_size, in_chans, embed_dim, patch_size)
@@ -225,7 +225,7 @@ class AltMaskedAutoencoderViT(nn.Module):
             p = self.patch_embed.patch_size[0]
             h=w=imgs.shape[2]//p
             x = imgs.reshape(shape=(imgs.shape[0], self.in_chans, h, p, w, p))
-            x = torch.einsum('nchpwq->nhwpqc', imgs)
+            x = torch.einsum('nchpwq->nhwpqc', x)
 
         x = x.reshape(shape=(imgs.shape[0], self.img_size, self.img_size*self.in_chans))
         return x
@@ -459,8 +459,6 @@ class AltMaskedAutoencoderViT(nn.Module):
         """
         N,L,_=pred.shape
 
-        sp_masks = 1-ssl_masks
-        sp_masks = self.patchify(sp_masks, patch_direction=patch_direction)
         if full is not None:
             target = self.patchify(full, patch_direction=patch_direction)
         else:
@@ -475,6 +473,8 @@ class AltMaskedAutoencoderViT(nn.Module):
         # loss = (pred - target) ** 2
         loss = torch.abs(pred - target)
         if self.ssl: # calculate loss in only acquired data 
+            sp_masks = 1-ssl_masks
+            sp_masks = self.patchify(sp_masks, patch_direction=patch_direction)
             loss = loss*sp_masks
         '''
         if self.divide_loss is not None:
