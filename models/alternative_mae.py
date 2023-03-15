@@ -31,9 +31,9 @@ def forward_wrapper(attn_obj):
 class PosCNN(nn.Module):
     def __init__(self, in_chans, patch_size=16, embed_dim=768, s=1):
         super(PosCNN, self).__init__()
-        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 3, s, 1, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
-        self.proj1d_pe = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
-        self.proj1d_ro = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 27, s, 13, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
+        self.proj1d_pe = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj1d_ro = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
         self.s = s
         self.patch_size = [patch_size, patch_size]
         self.num_patches = 256
@@ -52,7 +52,7 @@ class PosCNN(nn.Module):
         elif patch_direction=='pe':
             cnn_feat = feat_token.transpose(1, 2)
             cnn_feat = self.proj1d_pe(cnn_feat)
-            cnn_feat = cnn_feat.tranpose(1,2)
+            cnn_feat = cnn_feat.transpose(1,2)
         else: # ro
             cnn_feat = feat_token.transpose(1, 2) # B,C,N
             cnn_feat = self.proj1d_ro(cnn_feat)
@@ -408,7 +408,7 @@ class AltMaskedAutoencoderViT(nn.Module):
         return x, mask, ids_restore, pair_ids
 
 
-    def forward_decoder(self, x, ids_restore, patch_direction=patch_direction):
+    def forward_decoder(self, x, ids_restore, patch_direction='pe'):
         # embed tokens
         x = self.decoder_embed(x)
 
