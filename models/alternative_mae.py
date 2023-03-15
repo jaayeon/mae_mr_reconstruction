@@ -31,8 +31,9 @@ def forward_wrapper(attn_obj):
 class PosCNN(nn.Module):
     def __init__(self, in_chans, patch_size=16, embed_dim=768, s=1):
         super(PosCNN, self).__init__()
-        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 27, s, 13, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
-        self.proj1d = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 3, s, 1, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
+        self.proj1d_pe = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj1d_ro = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
         self.s = s
         self.patch_size = [patch_size, patch_size]
         self.num_patches = 256
@@ -48,9 +49,13 @@ class PosCNN(nn.Module):
             cnn_feat = feat_token.transpose(1, 2).view(B, C, H, W)
             cnn_feat = self.proj2d(cnn_feat)
             cnn_feat = cnn_feat.flatten(2).transpose(1, 2)
-        else:
+        elif patch_direction=='pe':
+            cnn_feat = feat_token.transpose(1, 2)
+            cnn_feat = self.proj1d_pe(cnn_feat)
+            cnn_feat = cnn_feat.tranpose(1,2)
+        else: # ro
             cnn_feat = feat_token.transpose(1, 2) # B,C,N
-            cnn_feat = self.proj1d(cnn_feat)
+            cnn_feat = self.proj1d_ro(cnn_feat)
             cnn_feat = cnn_feat.transpose(1,2)
 
         if self.s == 1:
@@ -376,7 +381,7 @@ class AltMaskedAutoencoderViT(nn.Module):
         if self.pos_embed_type=='absolute':
             x = x + self.pos_embed[:, 1:, :]
         elif self.pos_embed_type=='conditional':
-            x = self.pos_embed(x)
+            x = self.pos_embed(x, patch_direction=patch_direction)
 
         # masking: length -> length * mask_ratio
         if self.train and self.mae:
@@ -403,7 +408,7 @@ class AltMaskedAutoencoderViT(nn.Module):
         return x, mask, ids_restore, pair_ids
 
 
-    def forward_decoder(self, x, ids_restore):
+    def forward_decoder(self, x, ids_restore, patch_direction=patch_direction):
         # embed tokens
         x = self.decoder_embed(x)
 
@@ -419,7 +424,7 @@ class AltMaskedAutoencoderViT(nn.Module):
             x = x + self.decoder_pos_embed
         elif self.pos_embed_type == 'conditional':
             cls_token = x[:,:1,:]
-            x = self.decoder_pos_embed(x[:,1:,:])
+            x = self.decoder_pos_embed(x[:,1:,:], patch_direction=patch_direction)
             x = torch.cat([cls_token, x], dim=1)
 
         if not torch.isfinite(x).all():
@@ -508,7 +513,7 @@ class AltMaskedAutoencoderViT(nn.Module):
 
         for pd in self.patch_direction:
             latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks, patch_direction=pd)
-            pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+            pred1 = self.forward_decoder(latent1, ids_restore1, patch_direction=pd)  # [N, L, p*p*3]
             #dc layer
             predfreq1 = self.unpatchify(pred1, patch_direction=pd)
             predfreq1 = imgs + predfreq1*ssl_masks
