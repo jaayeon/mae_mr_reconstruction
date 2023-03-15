@@ -39,7 +39,7 @@ class PosCNN(nn.Module):
 
     def forward(self, x, patch_direction='ro'):
         B, N, C = x.shape
-        H, W = int(N**0.5)
+        H= W = int(N**0.5)
         assert N==H*W
 
         # cls_token = x[:,:1,:]
@@ -105,7 +105,7 @@ class AltMaskedAutoencoderViT(nn.Module):
                  num_low_freqs=None, guided_attention=0., regularize_attnmap=False):
         super().__init__()
         # patch_direction: ['pe','ro'], ['pe','ro','2d'], ['pe','2d']
-        self.pos_embed_type='absolute' #'absolute'
+        self.pos_embed_type='conditional' #'absolute'
         # --------------------------------------------------------------------------
         # MAE encoder specifics
         self.patch_embed = PatchEmbed(img_size, in_chans, embed_dim, patch_size)
@@ -114,7 +114,7 @@ class AltMaskedAutoencoderViT(nn.Module):
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         if self.pos_embed_type == 'conditional':
-            self.pos_embed = PosCNN(in_chans)
+            self.pos_embed = PosCNN(embed_dim)
         elif self.pos_embed_type == 'absolute':
             self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim), requires_grad=False)  # fixed sin-cos embedding
 
@@ -135,7 +135,7 @@ class AltMaskedAutoencoderViT(nn.Module):
         if self.pos_embed_type == 'absolute':
             self.decoder_pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, decoder_embed_dim), requires_grad=False)  # fixed sin-cos embedding
         elif self.pos_embed_type == 'conditional':
-            self.decoder_pos_embed = PosCNN(in_chans)
+            self.decoder_pos_embed = PosCNN(decoder_embed_dim)
 
         self.decoder_blocks = nn.ModuleList([
             Block(decoder_embed_dim, decoder_num_heads, mlp_ratio, qkv_bias=True, norm_layer=norm_layer) # qk_scale=None -> LayerScale=None..?
@@ -389,7 +389,9 @@ class AltMaskedAutoencoderViT(nn.Module):
         # append cls token
         if self.pos_embed_type=='absolute':
             cls_token = self.cls_token + self.pos_embed[:, :1, :]
-        cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+            cls_tokens = cls_token.expand(x.shape[0], -1, -1)
+        elif self.pos_embed_type=='conditional':
+            cls_tokens = self.cls_token.expand(x.shape[0], -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
 
         # apply Transformer blocks
@@ -416,7 +418,9 @@ class AltMaskedAutoencoderViT(nn.Module):
         if self.pos_embed_type=='absolute':
             x = x + self.decoder_pos_embed
         elif self.pos_embed_type == 'conditional':
-            x = self.decoder_pos_embed(x)
+            cls_token = x[:,:1,:]
+            x = self.decoder_pos_embed(x[:,1:,:])
+            x = torch.cat([cls_token, x], dim=1)
 
         if not torch.isfinite(x).all():
             print('anomaly detected d1')
