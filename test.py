@@ -131,7 +131,7 @@ def main(args):
             samples = data['down'].to(device, non_blocking=True)
             ssl_masks = data['mask'].to(device, non_blocking=True) # 0 is keep, 1 is remove
             full_samples = data['full'].to(device, non_blocking=True)
-            pred, _  = model(samples, ssl_masks, full_samples)
+            pred  = model(samples, ssl_masks, full_samples)
 
 
             # Data consistency

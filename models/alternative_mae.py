@@ -554,14 +554,14 @@ class AltMaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks, patch_direction=pd) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, self.unpatchify(pred1, patch_direction=pd), mask1, reg
+            return loss1+loss2, sslloss1+sslloss2, reg
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full, patch_direction=pd) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
 
-            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1, reg
+            return loss, imgloss, torch.tensor([0], device=loss.device), reg
         else: #not train, not ssl
-            return predfreq1, mask1
+            return predfreq1
 
 
 def mae_alt_small_4_768(**kwargs):

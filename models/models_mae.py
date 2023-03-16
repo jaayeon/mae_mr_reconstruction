@@ -550,9 +550,9 @@ class MaskedAutoencoderViT(nn.Module):
         if self.train and not self.ssl:
             loss = self.forward_kspace_loss(predfreq, fullfreq) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg, full)
-            return loss, imgloss, torch.tensor([0], device=loss.device), predimg, mask1
+            return loss, imgloss, torch.tensor([0], device=loss.device)
         else: #not train, not ssl
-            return predimg, mask1
+            return predimg
 
     def forward_kspace(self, imgs, ssl_masks, full, mask_ratio=0.75):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
@@ -598,15 +598,15 @@ class MaskedAutoencoderViT(nn.Module):
             loss2 = self.forward_loss(imgs, pred2, mask2, ssl_masks) #mask: 0 is keep, 1 is remove
             sslloss1 = self.forward_ssl_loss(ppred1, pred2.detach(), mask1, mask2, ssl_masks)
             sslloss2 = self.forward_ssl_loss(pred1.detach(), ppred2, mask1, mask2, ssl_masks)
-            return loss1+loss2, sslloss1+sslloss2, predfreq1, mask1, reg
+            return loss1+loss2, sslloss1+sslloss2, reg
         elif self.train and not self.ssl:
             loss = self.forward_loss(imgs, pred1, mask1, ssl_masks, full=full) #mask: 0 is keep, 1 is remove
             imgloss = self.forward_img_loss(predimg1, fullimg)
             #loss = self.forward_sp_loss(pred1, full, mask1, ssl_masks)
             #return loss+imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1
-            return loss, imgloss, torch.tensor([0], device=loss.device), predfreq1, mask1, reg
+            return loss, imgloss, torch.tensor([0], device=loss.device), reg
         else: #not train, not ssl
-            return predfreq1, mask1
+            return predfreq1
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
         if self.domain=='img':
