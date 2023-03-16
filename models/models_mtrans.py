@@ -82,9 +82,9 @@ class CrossMaskedAutoencoderViT(nn.Module):
                  num_low_freqs=None, guided_attention=0., regularize_attnmap=False):
         super().__init__()
 
-        self.head = ReconstructionHead(in_chans, 32)
-        self.patch_embed1 = PatchEmbed(img_size, 32, embed_dim, patch_size, patch_direction=patch_direction[0])
-        self.patch_embed2 = PatchEmbed(img_size, 32, embed_dim, patch_size, patch_direction=patch_direction[1])
+        #self.head = ReconstructionHead(in_chans, 32)
+        self.patch_embed1 = PatchEmbed(img_size, in_chans, embed_dim, patch_size, patch_direction=patch_direction[0])
+        self.patch_embed2 = PatchEmbed(img_size, in_chans, embed_dim, patch_size, patch_direction=patch_direction[1])
 
         self.cls_token1 = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.cls_token2 = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -251,7 +251,7 @@ class CrossMaskedAutoencoderViT(nn.Module):
 
     def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
         # head
-        x = self.head(x)
+        #x = self.head(x)
         # embed patches
         x1 = self.patch_embed1(x)
         x2 = self.patch_embed2(x)
@@ -382,7 +382,7 @@ class CrossMaskedAutoencoderViT(nn.Module):
 
             return loss, imgloss, torch.tensor([0],device=loss.device), torch.tensor([0],device=loss.device)
         else: # test
-            return (pred1+pred2)/2
+            return (fpred1+fpred2)/2
         
 
 def mae_cross_small_4_768(**kwargs):

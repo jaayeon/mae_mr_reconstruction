@@ -135,7 +135,7 @@ def valid_one_epoch(model: torch.nn.Module,
                 samples = samples*(mask.to(samples.device))
                 ssl_masks = smasks.to(samples.device) """
 
-            pred, _  = model(samples, ssl_masks, full, mask_ratio=0)
+            pred = model(samples, ssl_masks, full, mask_ratio=0)
             
             if args.domain=='kspace':
                 samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full[0,:,:,:], permute=True) 
