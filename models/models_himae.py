@@ -626,6 +626,6 @@ himae_large = himae_large_8_1024 #decoder: 768 dim, 12 blocks
 himae_base = himae_base_6_768
 himae_small = himae_small_4_768
 
-vit2d_large = hivit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
-vit2d_base = hivit_2d_base_4_1024
-vit2d_small = hivit_2d_small_4_768
+# vit2d_large = hivit_2d_large_8_1024 #decoder: 768 dim, 12 blocks
+# vit2d_base = hivit_2d_base_4_1024
+# vit2d_small = hivit_2d_small_4_768

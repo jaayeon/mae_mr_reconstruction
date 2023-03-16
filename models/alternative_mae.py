@@ -31,9 +31,9 @@ def forward_wrapper(attn_obj):
 class PosCNN(nn.Module):
     def __init__(self, in_chans, patch_size=16, embed_dim=768, s=1):
         super(PosCNN, self).__init__()
-        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 27, s, 13, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
-        self.proj1d_pe = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
-        self.proj1d_ro = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 55, s, 27, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj2d = nn.Sequential(nn.Conv2d(in_chans, embed_dim, 3, s, 1, bias=True, groups=embed_dim), ) # before AE: 27, s, 13 | after AE: 3, s, 1
+        self.proj1d_pe = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
+        self.proj1d_ro = nn.Sequential(nn.Conv1d(in_chans, embed_dim, 7, s, 3, bias=True, groups=embed_dim), ) # before AE: 55, s, 27 | after AE: 7, s, 3
         self.s = s
         self.patch_size = [patch_size, patch_size]
         self.num_patches = 256
@@ -380,16 +380,16 @@ class AltMaskedAutoencoderViT(nn.Module):
         # add pos embed w/o cls token
         if self.pos_embed_type=='absolute':
             x = x + self.pos_embed[:, 1:, :]
-        elif self.pos_embed_type=='conditional':
-            x = self.pos_embed(x, patch_direction=patch_direction)
+        # elif self.pos_embed_type=='conditional':
+        #     x = self.pos_embed(x, patch_direction=patch_direction)
 
         # masking: length -> length * mask_ratio
         if self.train and self.mae:
-            x, mask, ids_restore, pair_ids = self.random_masking(x, mask_ratio, ssl_masks, given_ids_shuffle=given_ids_shuffle)
+            x, mask, ids_restore, ids_shuffle = self.random_masking(x, mask_ratio, ssl_masks, given_ids_shuffle=given_ids_shuffle)
         else:
             mask = None
             ids_restore = None
-            pair_ids = None
+            ids_shuffle = None
 
         # append cls token
         if self.pos_embed_type=='absolute':
@@ -400,12 +400,15 @@ class AltMaskedAutoencoderViT(nn.Module):
         x = torch.cat((cls_tokens, x), dim=1)
 
         # apply Transformer blocks
-        for blk in self.blocks:
+        for i, blk in enumerate(self.blocks):
             x = blk(x)
+            if i==0 and self.pos_embed_type=='conditional': # do not consider the random masking; first block with full patches and masking from second blocks?
+                x_ = self.pos_embed(x[:,1:,:], patch_direction=patch_direction)
+                x = torch.cat((x[:,:1,:], x_), dim=1)
 
         x = self.norm(x)
 
-        return x, mask, ids_restore, pair_ids
+        return x, mask, ids_restore, ids_shuffle
 
 
     def forward_decoder(self, x, ids_restore, patch_direction='pe'):
@@ -422,10 +425,10 @@ class AltMaskedAutoencoderViT(nn.Module):
         # add pos embed
         if self.pos_embed_type=='absolute':
             x = x + self.decoder_pos_embed
-        elif self.pos_embed_type == 'conditional':
-            cls_token = x[:,:1,:]
-            x = self.decoder_pos_embed(x[:,1:,:], patch_direction=patch_direction)
-            x = torch.cat([cls_token, x], dim=1)
+        # elif self.pos_embed_type == 'conditional':
+        #     cls_token = x[:,:1,:]
+        #     x = self.decoder_pos_embed(x[:,1:,:], patch_direction=patch_direction)
+        #     x = torch.cat([cls_token, x], dim=1)
 
         if not torch.isfinite(x).all():
             print('anomaly detected d1')
@@ -441,8 +444,12 @@ class AltMaskedAutoencoderViT(nn.Module):
             if not torch.isfinite(x).all():
                 print('anomaly detected in after {}th block'.format(i))
         '''
-        for blk in self.decoder_blocks:
+        for i, blk in enumerate(self.decoder_blocks):
             x = blk(x)
+            if i==0 and self.pos_embed_type=='conditional':
+                cls_token = x[:,:1,:]
+                x = self.decoder_pos_embed(x[:,1:,:], patch_direction=patch_direction)
+                x = torch.cat([cls_token, x], dim=1)
         
 
         if not torch.isfinite(x).all():

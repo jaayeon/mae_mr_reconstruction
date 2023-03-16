@@ -39,6 +39,57 @@ def forward_wrapper(attn_obj):
         return x
     return my_forward
 
+class ReconstructionHead(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super(ReconstructionHead, self).__init__()
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+
+        self.conv1 = nn.Conv2d(self.input_dim, self.hidden_dim, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(self.hidden_dim, self.hidden_dim, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2d(self.hidden_dim, self.hidden_dim, kernel_size=3, padding=1)
+
+        self.bn1 = nn.BatchNorm2d(self.hidden_dim)
+        self.bn2 = nn.BatchNorm2d(self.hidden_dim)
+        self.bn3 = nn.BatchNorm2d(self.hidden_dim)
+
+        self.act = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.act(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.act(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out = self.act(out)
+
+        return out
+
+
+class PatchEmbed(nn.Module):
+    def __init__(self, img_size=256, in_chans=2, embed_dim=768, patch_size=16):
+        super().__init__()
+        """
+        imgs: (N, c, H, W) --> (N, H, cxW)
+        x: (N, L, D)
+        """
+        self.img_size = img_size
+        self.in_chans = in_chans
+        self.proj = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size, bias=True)
+        self.num_patches = img_size
+        self.patch_size = [patch_size, patch_size]
+
+    def forward(self, imgs, patch_direction='ro'):
+
+        x = self.proj(imgs)
+        x = x.flatten(2).transpose(1,2)
+            
+        return x
 
 class MaskedAutoencoderViT(nn.Module):
     """ Masked Autoencoder with VisionTransformer backbone
@@ -52,7 +103,10 @@ class MaskedAutoencoderViT(nn.Module):
 
         # --------------------------------------------------------------------------
         # MAE encoder specifics
-        self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+        # self.patch_embed = PatchEmbed(img_size, patch_size, in_chans, embed_dim)
+        self.head = ReconstructionHead(in_chans, 32)
+        self.patch_embed = PatchEmbed(in_chans=32, embed_dim=embed_dim)
+
         num_patches = self.patch_embed.num_patches
 
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
@@ -367,7 +421,7 @@ class MaskedAutoencoderViT(nn.Module):
 
     def forward_encoder(self, x, mask_ratio, given_ids_shuffle=None):
         # embed patches
-        x = self.patch_embed(x)
+        x = self.patch_embed(self.head(x))
 
         # add pos embed w/o cls token
         x = x + self.pos_embed[:, 1:, :]
