@@ -373,16 +373,18 @@ class CrossMaskedAutoencoderViT(nn.Module):
             '''
             pass
         elif self.train and not self.ssl:
-            loss1 = self.forward_loss(imgs, pred1, full=full, patch_direction=self.patch_direction[0])
-            loss2 = self.forward_loss(imgs, pred2, full=full, patch_direction=self.patch_direction[1])
-            loss = (loss1+loss2)/2
-            imgloss1 = self.forward_img_loss(ipred1, ifull)
-            imgloss2 = self.forward_img_loss(ipred2, ifull)
-            imgloss = (imgloss1+imgloss2)/2
+            loss = self.forward_loss(imgs, pred1, full=full, patch_direction=self.patch_direction[0])
+            #loss2 = self.forward_loss(imgs, pred2, full=full, patch_direction=self.patch_direction[1])
+            #loss = (loss1+loss2)/2
+            imgloss = self.forward_img_loss(ipred1, ifull)
+            #imgloss2 = self.forward_img_loss(ipred2, ifull)
+            #imgloss = (imgloss1+imgloss2)/2
 
             return loss, imgloss, torch.tensor([0],device=loss.device), torch.tensor([0],device=loss.device)
         else: # test
-            return (fpred1+fpred2)/2
+            # return (fpred1+fpred2)/2
+            # return fpred2
+            return fpred1
         
 
 def mae_cross_small_4_768(**kwargs):
@@ -395,8 +397,8 @@ def mae_cross_small_4_768(**kwargs):
 
 def vit_alt_small_4_768(**kwargs):
     model = CrossMaskedAutoencoderViT(
-        embed_dim=768, depth=4, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        embed_dim=768, depth=2, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=2, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), mae=False, **kwargs
     )
     return model

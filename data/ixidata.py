@@ -53,6 +53,7 @@ class IXIDataset(Dataset):
             imgdata = pickle.load(f)
         imgdata = torch.tensor(imgdata).unsqueeze(0)
         imgdata = self.normalize(imgdata)
+        imgdata = imgdata.permute(0,2,1) #to make [slice, ro direction, pe direction]
         kdata = rfft2(imgdata, permute=True)
         kdata = self.scale(kdata)
         #kdata = kdata.permute(2,0,1) #c,h,w
