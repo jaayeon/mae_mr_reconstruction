@@ -153,7 +153,7 @@ class CrossMaskedAutoencoderViT(nn.Module):
         elif patch_direction=='pe':
             x = torch.einsum('nchw->nwhc', imgs)
         elif patch_direction=='2d':
-            p = self.patch_embed.patch_size[0]
+            p = self.patch_embed1.patch_size[0]
             h=w=imgs.shape[2]//p
             x = imgs.reshape(shape=(imgs.shape[0], self.in_chans, h, p, w, p))
             x = torch.einsum('nchpwq->nhwpqc', x)
@@ -173,7 +173,7 @@ class CrossMaskedAutoencoderViT(nn.Module):
             x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
             imgs = torch.einsum('nwhc->nchw', x)
         elif patch_direction=='2d':
-            p = self.patch_embed.patch_size[0]
+            p = self.patch_embed1.patch_size[0]
             h=w=int(x.shape[1]**.5)
             assert h*w == x.shape[1]
             x = x.reshape(shape=(x.shape[0], h, w, p, p, self.in_chans))
@@ -389,8 +389,8 @@ class CrossMaskedAutoencoderViT(nn.Module):
 
 def mae_cross_small_4_768(**kwargs):
     model = CrossMaskedAutoencoderViT(
-        embed_dim=768, depth=4, num_heads=12,
-        decoder_embed_dim=768, decoder_depth=4, decoder_num_heads=16,
+        embed_dim=768, depth=2, num_heads=12,
+        decoder_embed_dim=768, decoder_depth=2, decoder_num_heads=16,
         mlp_ratio=4, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs
     )
     return model
