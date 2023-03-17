@@ -373,18 +373,18 @@ class CrossMaskedAutoencoderViT(nn.Module):
             '''
             pass
         elif self.train and not self.ssl:
-            loss = self.forward_loss(imgs, pred1, full=full, patch_direction=self.patch_direction[0])
-            #loss2 = self.forward_loss(imgs, pred2, full=full, patch_direction=self.patch_direction[1])
-            #loss = (loss1+loss2)/2
-            imgloss = self.forward_img_loss(ipred1, ifull)
-            #imgloss2 = self.forward_img_loss(ipred2, ifull)
-            #imgloss = (imgloss1+imgloss2)/2
+            loss1 = self.forward_loss(imgs, pred1, full=full, patch_direction=self.patch_direction[0])
+            loss2 = self.forward_loss(imgs, pred2, full=full, patch_direction=self.patch_direction[1])
+            loss = (loss1+loss2)/2
+            imgloss1 = self.forward_img_loss(ipred1, ifull)
+            imgloss2 = self.forward_img_loss(ipred2, ifull)
+            imgloss = (imgloss1+imgloss2)/2
 
             return loss, imgloss, torch.tensor([0],device=loss.device), torch.tensor([0],device=loss.device)
         else: # test
-            # return (fpred1+fpred2)/2
+            return (fpred1+fpred2)/2
             # return fpred2
-            return fpred1
+            # return fpred1
         
 
 def mae_cross_small_4_768(**kwargs):
