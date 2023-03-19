@@ -100,6 +100,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.img_size = img_size
         # --------------------------------------------------------------------------
         # MAE encoder specifics
+        if type(patch_direction)==list and len(patch_direction)==1:
+            patch_direction=patch_direction[0]
         self.patch_embed = PatchEmbed(patch_direction, img_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
