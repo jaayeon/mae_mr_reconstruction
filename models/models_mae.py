@@ -20,6 +20,7 @@ from timm.models.vision_transformer import PatchEmbed, Block
 
 from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
 from util.mri_tools import rifft2, rfft2, normalize
+from util.vggloss import perceptualloss
 
 def forward_wrapper(attn_obj):
     def my_forward(x):
@@ -106,6 +107,8 @@ class MaskedAutoencoderViT(nn.Module):
         self.masking_ids = None
         self.guided_attention = guided_attention
         self.regularize_attnmap = True if regularize_attnmap else False
+
+        self.ploss = perceptualloss()
 
         self.initialize_weights()
 
@@ -525,7 +528,8 @@ class MaskedAutoencoderViT(nn.Module):
     def forward_img_loss(self, predimg, fullimg):
         N,_,_,_=predimg.shape
         imgloss = torch.sum(torch.abs(predimg-fullimg))/N
-        return imgloss
+        ploss = self.ploss(predimg, fullimg)
+        return imgloss+ploss
 
     def forward_img(self, imgs, ssl_masks, full, mask_ratio=0.25):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)
