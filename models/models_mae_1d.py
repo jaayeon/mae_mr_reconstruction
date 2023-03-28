@@ -41,6 +41,42 @@ def forward_wrapper(attn_obj):
     return my_forward
 
 
+class Head(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        
+        self.conv1 = nn.Conv2d(input_dim, hidden_dim, kernel_size=13, padding=6)
+        self.conv2 = nn.Conv2d(hidden_dim, hidden_dim, kernel_size=5, padding=2)
+        self.conv3 = nn.Conv2d(hidden_dim, hidden_dim, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2d(hidden_dim, input_dim, 1)
+
+        self.bn1 = nn.BatchNorm2d(hidden_dim)
+        self.bn2 = nn.BatchNorm2d(hidden_dim)
+        self.bn3 = nn.BatchNorm2d(hidden_dim)
+
+        self.act = nn.LeakyReLU(inplace=True)
+
+    def forward(self, x, ssl_masks):
+        # ssl_masks: 1-remove 0-exist
+
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.act(out)
+
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.act(out)
+
+        out = self.conv3(out)
+        out = self.bn3(out)
+        out = self.act(out)
+
+        out = self.conv4(out)
+        out = out*ssl_masks + x
+
+        return out
+
+
 class PatchEmbed(nn.Module):
     def __init__(self, patch_direction='ro', img_size=256, in_chans=2, embed_dim=768):
         super().__init__()
@@ -103,6 +139,8 @@ class MaskedAutoencoderViT1d(nn.Module):
         # MAE encoder specifics
         if type(patch_direction)==list and len(patch_direction)==1:
             patch_direction=patch_direction[0]
+
+        self.head = Head(in_chans, 32)
         self.patch_embed = PatchEmbed(patch_direction, img_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
@@ -128,8 +166,8 @@ class MaskedAutoencoderViT1d(nn.Module):
             for i in range(decoder_depth)])
 
         self.decoder_norm = norm_layer(decoder_embed_dim)
-        self.decoder_pred = nn.Linear(decoder_embed_dim, in_chans*img_size, bias=True) # decoder to patch
-
+        # self.decoder_pred = nn.Linear(decoder_embed_dim, in_chans*img_size, bias=True) # decoder to patch
+        self.tail = nn.Conv2d(decoder_embed_dim//img_size, in_chans, 1)
         # self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
         #                                 nn.GELU(),
         #                                 nn.Linear(128, in_chans*img_size))
@@ -218,7 +256,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         x: (N, H, cxW)
         imgs: (N, c, H, W)
         """      
-        x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, self.in_chans))
+        x = x.reshape(shape=(x.shape[0], self.img_size, self.img_size, -1))
         if self.pd=='ro':
             imgs = torch.einsum('nhwc->nchw', x)
         elif self.pd=='pe':
@@ -269,11 +307,13 @@ class MaskedAutoencoderViT1d(nn.Module):
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
         
         removed_index=None
+        '''
         if self.pd=='pe' and torch.sum(ssl_masks)!=0:  #downsampled image
             removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0] #1: unscanned, 0: scanned
             # vit -> x need, mae -> needed.  
             if len_keep+len(removed_index)>L:
                 len_keep = L - len(removed_index)
+        '''
 
         if given_ids_shuffle is not None:
             ids_shuffle = given_ids_shuffle
@@ -348,6 +388,9 @@ class MaskedAutoencoderViT1d(nn.Module):
         return x_masked, mask, ids_restore, ids_shuffle
 
     def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
+        #head 
+        x = self.head(x, ssl_masks)
+
         # embed patches
         x = self.patch_embed(x)
 
@@ -411,11 +454,13 @@ class MaskedAutoencoderViT1d(nn.Module):
             print('anomaly detected d2')
         x = self.decoder_norm(x)
 
-        # predictor projection
-        x = self.decoder_pred(x)
-
         # remove cls token
         x = x[:, 1:, :]
+
+        # predictor projection
+        # x = self.decoder_pred(x)
+        x = self.unpatchify(x)
+        x = self.tail(x)
 
         return x
 
@@ -427,14 +472,16 @@ class MaskedAutoencoderViT1d(nn.Module):
         ssl_masks: [N, 1, H, W] 0 is keep, 1 is remove
         sp_masks: [N, 1, H, W] 0 is remove, 1 is keep
         """
-        N,L,_=pred.shape
+        N=pred.size(0)
 
         sp_masks = 1-ssl_masks
-        sp_masks = self.patchify(sp_masks)
+        # sp_masks = self.patchify(sp_masks)
         if full is not None:
-            target = self.patchify(full)
+            # target = self.patchify(full)
+            target = full
         else:
-            target = self.patchify(imgs)
+            # target = self.patchify(imgs)
+            target = imgs
         if self.norm_pix_loss:
             mean = target.mean(dim=-1, keepdim=True)
             var = target.var(dim=-1, keepdim=True)
@@ -444,9 +491,11 @@ class MaskedAutoencoderViT1d(nn.Module):
         loss = torch.abs(pred - target)
         if self.ssl: # calculate loss in only acquired data 
             loss = loss*sp_masks
+        '''
         if self.divide_loss is not None:
-            divide_loss = self.patchify(self.divide_loss)
+            # divide_loss = self.patchify(self.divide_loss)
             loss = loss*divide_loss.to(loss.device)
+        '''
         loss = loss.mean(dim=-1)  # [N, L], mean loss per patch
 
         if self.ssl:
@@ -510,8 +559,8 @@ class MaskedAutoencoderViT1d(nn.Module):
             reg = 0.0
 
         #dc layer
-        predfreq1 = self.unpatchify(pred1)
-        predfreq1 = imgs + predfreq1*ssl_masks
+        # predfreq1 = self.unpatchify(pred1)
+        predfreq1 = imgs + pred1*ssl_masks
 
         #ifft
         predimg1, fullimg = rifft2(predfreq1, full, permute=True)
