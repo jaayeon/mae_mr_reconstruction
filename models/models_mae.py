@@ -108,7 +108,7 @@ class MaskedAutoencoderViT(nn.Module):
         self.guided_attention = guided_attention
         self.regularize_attnmap = True if regularize_attnmap else False
 
-        self.ploss = perceptualloss()
+        # self.ploss = perceptualloss()
 
         self.initialize_weights()
 
@@ -528,8 +528,9 @@ class MaskedAutoencoderViT(nn.Module):
     def forward_img_loss(self, predimg, fullimg):
         N,_,_,_=predimg.shape
         imgloss = torch.sum(torch.abs(predimg-fullimg))/N
-        ploss = self.ploss(predimg, fullimg)
-        return imgloss+ploss
+        # ploss = self.ploss(predimg, fullimg)
+        # return imgloss+ploss
+        return imgloss
 
     def forward_img(self, imgs, ssl_masks, full, mask_ratio=0.25):
         latent1, mask1, ids_restore1, pair_ids = self.forward_encoder(imgs, mask_ratio)

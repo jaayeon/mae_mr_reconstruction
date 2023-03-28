@@ -54,7 +54,6 @@ def get_args_parser():
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
-                                    'mae_hivit_small', 'mae_hivit_base', 'hivit_small', 'hivit_base', 'himae_base', 'himae_small',
                                     'mae_alt_small', 'vit_alt_small', 'mae_cross_small', 'vit_cross_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)

@@ -588,5 +588,6 @@ def swin_small_4_96(**kwargs):
         window_size=7, mlp_ratio=4., qkv_bias=True, qk_scale=None, drop_rate=0.0, drop_path_rate=0.1,
         ape=False, patch_norm=True, use_checkpoint=False, num_classes=0
     )
+    return model
 
 swin_small = swin_small_4_96

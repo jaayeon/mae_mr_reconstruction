@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from timm.models.layers import trunc_normal_
 
 from .models_swin import SwinTransformer
-from .vision_transformer import VisionTransformer
+# from .vision_transformer import VisionTransformer
 
 
 class SwinTransformerForSimMIM(SwinTransformer):
@@ -54,7 +54,7 @@ class SwinTransformerForSimMIM(SwinTransformer):
     def no_weight_decay(self):
         return super().no_weight_decay() | {'mask_token'}
 
-
+'''
 class VisionTransformerForSimMIM(VisionTransformer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -94,7 +94,7 @@ class VisionTransformerForSimMIM(VisionTransformer):
         H = W = int(L ** 0.5)
         x = x.permute(0, 2, 1).reshape(B, C, H, W)
         return x
-
+'''
 
 class SimMIM(nn.Module):
     def __init__(self, encoder, encoder_stride):
@@ -153,7 +153,7 @@ class MaskGenerator:
     def __call__(self):
         mask_idx = np.random.permutation(self.token_count)[:self.mask_count]
         mask = np.zeros(self.token_count, dtype=int)
-        mask[mask_idx] = 1
+        mask[mask_idx] = 1 # masking:1, no-masking:0
 
         mask = mask.reshape((self.rand_size, self.rand_size))
         mask = mask.repeat(self.scale, axis=0).repeat(self.scale, axis=1)
@@ -161,50 +161,27 @@ class MaskGenerator:
         return mask
 
 
-def build_simmim(config):
-    model_type = config.MODEL.TYPE
-    if model_type == 'swin':
-        encoder = SwinTransformerForSimMIM(
-            img_size=config.DATA.IMG_SIZE,
-            patch_size=config.MODEL.SWIN.PATCH_SIZE,
-            in_chans=config.MODEL.SWIN.IN_CHANS,
+def simmim_small_4(**kwargs):
+    encoder = SwinTransformerForSimMIM(
+            img_size=256, #224
+            patch_size=4,
+            in_chans=2,
             num_classes=0,
-            embed_dim=config.MODEL.SWIN.EMBED_DIM,
-            depths=config.MODEL.SWIN.DEPTHS,
-            num_heads=config.MODEL.SWIN.NUM_HEADS,
-            window_size=config.MODEL.SWIN.WINDOW_SIZE,
-            mlp_ratio=config.MODEL.SWIN.MLP_RATIO,
-            qkv_bias=config.MODEL.SWIN.QKV_BIAS,
-            qk_scale=config.MODEL.SWIN.QK_SCALE,
-            drop_rate=config.MODEL.DROP_RATE,
-            drop_path_rate=config.MODEL.DROP_PATH_RATE,
-            ape=config.MODEL.SWIN.APE,
-            patch_norm=config.MODEL.SWIN.PATCH_NORM,
-            use_checkpoint=config.TRAIN.USE_CHECKPOINT)
-        encoder_stride = 32
-    elif model_type == 'vit':
-        encoder = VisionTransformerForSimMIM(
-            img_size=config.DATA.IMG_SIZE,
-            patch_size=config.MODEL.VIT.PATCH_SIZE,
-            in_chans=config.MODEL.VIT.IN_CHANS,
-            num_classes=0,
-            embed_dim=config.MODEL.VIT.EMBED_DIM,
-            depth=config.MODEL.VIT.DEPTH,
-            num_heads=config.MODEL.VIT.NUM_HEADS,
-            mlp_ratio=config.MODEL.VIT.MLP_RATIO,
-            qkv_bias=config.MODEL.VIT.QKV_BIAS,
-            drop_rate=config.MODEL.DROP_RATE,
-            drop_path_rate=config.MODEL.DROP_PATH_RATE,
-            norm_layer=partial(nn.LayerNorm, eps=1e-6),
-            init_values=config.MODEL.VIT.INIT_VALUES,
-            use_abs_pos_emb=config.MODEL.VIT.USE_APE,
-            use_rel_pos_bias=config.MODEL.VIT.USE_RPB,
-            use_shared_rel_pos_bias=config.MODEL.VIT.USE_SHARED_RPB,
-            use_mean_pooling=config.MODEL.VIT.USE_MEAN_POOLING)
-        encoder_stride = 16
-    else:
-        raise NotImplementedError(f"Unknown pre-train model: {model_type}")
-
+            embed_dim=128,
+            depths=[2,2,18,2],
+            num_heads=[4,8,16,32],
+            window_size=7,
+            mlp_ratio=4,
+            qkv_bias=True,
+            qk_scale=None,
+            drop_rate=0.,
+            drop_path_rate=0.1,
+            ape=False,
+            patch_norm=True,
+            use_checkpoint=False)
+    encoder_stride = 32
     model = SimMIM(encoder=encoder, encoder_stride=encoder_stride)
 
-    return 
+    return model
+
+simmim_small = simmim_small_4

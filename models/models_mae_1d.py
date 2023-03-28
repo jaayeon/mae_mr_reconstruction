@@ -130,9 +130,9 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, in_chans*img_size, bias=True) # decoder to patch
 
-        self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
-                                        nn.GELU(),
-                                        nn.Linear(128, in_chans*img_size))
+        # self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
+        #                                 nn.GELU(),
+        #                                 nn.Linear(128, in_chans*img_size))
         # --------------------------------------------------------------------------
 
         self.wrap_blocks()
@@ -155,7 +155,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.guided_attention = guided_attention
         self.regularize_attnmap = True if regularize_attnmap else False
 
-        self.ploss = perceptualloss()
+        # self.ploss = perceptualloss()
 
         self.initialize_weights()
 
@@ -268,17 +268,12 @@ class MaskedAutoencoderViT1d(nn.Module):
         
         noise = torch.rand(N, L, device=x.device)  # noise in [0, 1]
         
-        '''
-        if self.pd=='ro' and torch.sum(ssl_masks)!=0:  #downsampled image
+        removed_index=None
+        if self.pd=='pe' and torch.sum(ssl_masks)!=0:  #downsampled image
             removed_index = ssl_masks[0,0,:,0].nonzero(as_tuple=True)[0] #1: unscanned, 0: scanned
             # vit -> x need, mae -> needed.  
             if len_keep+len(removed_index)>L:
                 len_keep = L - len(removed_index)
-            
-        else:
-            removed_index = None
-        '''
-        removed_index=None
 
         if given_ids_shuffle is not None:
             ids_shuffle = given_ids_shuffle
@@ -500,8 +495,9 @@ class MaskedAutoencoderViT1d(nn.Module):
     def forward_img_loss(self, predimg, fullimg):
         N,_,_,_=predimg.shape
         imgloss = torch.sum(torch.abs(predimg-fullimg))/N
-        ploss = self.ploss(predimg, fullimg)
-        return imgloss+ploss
+        # ploss = self.ploss(predimg, fullimg)
+        # return imgloss+ploss
+        return imgloss
 
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
