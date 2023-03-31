@@ -140,7 +140,7 @@ class MaskedAutoencoderViT1d(nn.Module):
         if type(patch_direction)==list and len(patch_direction)==1:
             patch_direction=patch_direction[0]
 
-        self.head = Head(in_chans, 32)
+        # self.head = Head(in_chans, 32)
         self.patch_embed = PatchEmbed(patch_direction, img_size, in_chans, embed_dim)
         num_patches = self.patch_embed.num_patches
 
@@ -389,7 +389,7 @@ class MaskedAutoencoderViT1d(nn.Module):
 
     def forward_encoder(self, x, mask_ratio, ssl_masks, given_ids_shuffle=None):
         #head 
-        x = self.head(x, ssl_masks)
+        # x = self.head(x, ssl_masks)
 
         # embed patches
         x = self.patch_embed(x)
@@ -551,20 +551,22 @@ class MaskedAutoencoderViT1d(nn.Module):
 
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
-        latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks)
-        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+        pred1 = imgs
+        for _ in range(3):
+            latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(pred1, mask_ratio, ssl_masks)
+            pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
 
-        if self.train and self.regularize_attnmap:
-            reg = self.attmap_regularization()
-        else:
-            reg = 0.0
+            if self.train and self.regularize_attnmap:
+                reg = self.attmap_regularization()
+            else:
+                reg = 0.0
 
-        #dc layer
-        # predfreq1 = self.unpatchify(pred1)
-        predfreq1 = imgs + pred1*ssl_masks
+            #dc layer
+            # predfreq1 = self.unpatchify(pred1)
+            pred1 = imgs + pred1*ssl_masks
 
         #ifft
-        predimg1, fullimg = rifft2(predfreq1, full, permute=True)
+        predimg1, fullimg = rifft2(pred1, full, permute=True)
         maxnum = torch.max(fullimg)
         minnum = torch.min(fullimg)
         predimg1 = (predimg1-minnum)/(maxnum-minnum+1e-08)
@@ -600,7 +602,7 @@ class MaskedAutoencoderViT1d(nn.Module):
 
             return loss, imgloss, torch.tensor([0], device=loss.device), reg
         else: #not train, not ssl
-            return predfreq1
+            return pred1
 
 
 
