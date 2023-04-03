@@ -24,7 +24,6 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 from torch.utils.data import DataLoader
 
-import timm
 
 #assert timm.__version__ == "0.3.2"  # version check
 import timm.optim.optim_factory as optim_factory
@@ -37,7 +36,7 @@ import models
 from engine_pretrain import train_one_epoch, valid_one_epoch
 
 from data.ixidata import IXIDataset
-# from data.fmridata import FMRIDataset
+from data.fastmridata import FastMRIDataset
 from util.mri_tools import rifft2
 from util.metric import calc_metrics
 
@@ -54,7 +53,7 @@ def get_args_parser():
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
-                                    'mae_alt_small', 'vit_alt_small', 'mae_cross_small', 'vit_cross_small'],
+                                    'mae_alt_small', 'vit_alt_small', 'mae_cross_small', 'vit_cross_small', 'swin_small', 'simmim_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
 
@@ -174,8 +173,13 @@ def main(args):
     cudnn.benchmark = True
 
     # dataset
-    dataset_train = IXIDataset(args, mode='train')
-    dataset_valid = IXIDataset(args, mode='valid')
+    if args.dataset=='ixi':
+        dataset_train = IXIDataset(args, mode='train')
+        dataset_valid = IXIDataset(args, mode='valid')
+    elif args.dataset=='fastmri':
+        dataset_train = FastMRIDataset(args, mode='train')
+        dataset_valid = FastMRIDataset(args, mode='valid')
+
 
     global_rank = misc.get_rank()
     if args.distributed:
@@ -212,6 +216,7 @@ def main(args):
     in_chans = 2 if args.domain=='kspace' else 1
     # define the model
     model = models.__dict__[args.model](patch_size=args.patch_size, 
+                                        img_size=args.input_size,
                                         #norm_pix_loss=args.norm_pix_loss, 
                                         ssl=args.ssl, 
                                         mask_center=args.mask_center, 

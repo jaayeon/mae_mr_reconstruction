@@ -18,7 +18,7 @@ import torch.nn as nn
 
 from timm.models.vision_transformer import Block
 
-from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian
+from util.pos_embed import get_2d_sincos_pos_embed, focal_gaussian, get_1d_sincos_pos_embed
 from util.mri_tools import rifft2, rfft2, normalize
 from util.vggloss import perceptualloss
 
@@ -211,10 +211,12 @@ class MaskedAutoencoderViT1d(nn.Module):
     def initialize_weights(self):
         # initialization
         # initialize (and freeze) pos_embed by sin-cos embedding
-        pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        # pos_embed = get_2d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches), cls_token=True)
         self.pos_embed.data.copy_(torch.from_numpy(pos_embed).float().unsqueeze(0))
 
-        decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        # decoder_pos_embed = get_2d_sincos_pos_embed(self.decoder_pos_embed.shape[-1], int(self.patch_embed.num_patches**.5), cls_token=True)
+        decoder_pos_embed = get_1d_sincos_pos_embed(self.pos_embed.shape[-1], int(self.patch_embed.num_patches), cls_token=True)
         self.decoder_pos_embed.data.copy_(torch.from_numpy(decoder_pos_embed).float().unsqueeze(0))
 
         # initialize patch_embed like nn.Linear (instead of nn.Conv2d)
@@ -551,19 +553,17 @@ class MaskedAutoencoderViT1d(nn.Module):
 
 
     def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
-        pred1 = imgs
-        for _ in range(3):
-            latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(pred1, mask_ratio, ssl_masks)
-            pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
+        latent1, mask1, ids_restore1, ids_shuffle = self.forward_encoder(imgs, mask_ratio, ssl_masks)
+        pred1 = self.forward_decoder(latent1, ids_restore1)  # [N, L, p*p*3]
 
-            if self.train and self.regularize_attnmap:
-                reg = self.attmap_regularization()
-            else:
-                reg = 0.0
+        if self.train and self.regularize_attnmap:
+            reg = self.attmap_regularization()
+        else:
+            reg = 0.0
 
-            #dc layer
-            # predfreq1 = self.unpatchify(pred1)
-            pred1 = imgs + pred1*ssl_masks
+        #dc layer
+        # predfreq1 = self.unpatchify(pred1)
+        pred1 = imgs + pred1*ssl_masks
 
         #ifft
         predimg1, fullimg = rifft2(pred1, full, permute=True)
