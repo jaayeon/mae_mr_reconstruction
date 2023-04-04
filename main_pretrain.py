@@ -105,7 +105,7 @@ def get_args_parser():
     parser.add_argument('--domain', default='kspace', choices=['kspace', 'img'])
 
     # Learning
-    parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
+    parser.add_argument('--output_dir', type=str, default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
@@ -153,10 +153,14 @@ def main(args):
     dt = datetime.datetime.now()
     if not args.resume:
         base = '{}_{}_X{}{}'.format(dt.strftime('%m%d'), args.model, args.downsample, '_'+args.note if args.note!=None else '')
+        args.output_dir = os.path.join(args.data_path, args.dataset, 'checkpoints')
+        if not os.path.exists(args.output_dir):
+            os.mkdir(args.output_dir)
         args.output_dir = os.path.join(args.output_dir, base)
         if not os.path.exists(args.output_dir):
             os.mkdir(args.output_dir)
     else:
+        args.output_dir = os.path.join(args.data_path, args.dataset, 'checkpoints')
         args.resume = os.path.join(args.output_dir, args.resume)
         args.output_dir = '/'.join(args.resume.split('/')[:-1])
         base = os.path.basename(args.output_dir)

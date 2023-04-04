@@ -46,7 +46,7 @@ def get_args_parser():
     parser.add_argument('--domain', default='kspace', choices=['kspace', 'img'])
 
     # Learning
-    parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
+    parser.add_argument('--output_dir', type=str, default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
