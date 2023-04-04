@@ -125,7 +125,6 @@ def main(args):
     save_folder = os.path.join(args.output_dir, 'test')
     save_concat = os.path.join(save_folder, 'test_concat')
     save_pred = os.path.join(save_folder, 'test_pred')
-    save_pred_dc = os.path.join(save_folder, 'test_pred_dc')
     save_concat_kspace = os.path.join(save_folder, 'test_concat_kspace')
 
 
@@ -133,8 +132,6 @@ def main(args):
         os.mkdir(save_folder)
     if not os.path.exists(save_concat):
         os.mkdir(save_concat)
-    if not os.path.exists(save_pred_dc):
-        os.mkdir(save_pred_dc)
     if not os.path.exists(save_pred):
         os.mkdir(save_pred)
     if not os.path.exists(save_concat_kspace):
@@ -163,7 +160,7 @@ def main(args):
                 test_stats[k]+=v/tnum
 
             imageio.imwrite(os.path.join(save_concat_kspace, 'concat_kspace_{:03d}.tif'.format(int(i))), concat_kspace.cpu().numpy())
-            imageio.imwrite(os.path.join(save_pred_dc, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
+            imageio.imwrite(os.path.join(save_pred, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
             imageio.imwrite(os.path.join(save_concat, 'concat_{:03d}.tif'.format(int(i))), torch.cat([isamples, ipred, ifull], dim=-1).squeeze().cpu().numpy())
 
             if args.save_num==i-1:

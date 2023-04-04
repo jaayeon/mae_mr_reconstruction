@@ -101,7 +101,8 @@ def rifft2(*data, permute=False):
             dt = permuteforward(dt)
         assert dt.shape[-1] == 2
         dt = ifft2(dt)
-        dt = dt[..., 0].unsqueeze(-1)
+        dt = (dt**2).sum(dim=-1).sqrt().unsqueeze(-1)
+        # dt = dt[..., 0].unsqueeze(-1)
         if permute:
             dt = permuteback(dt)
         return dt
@@ -121,7 +122,8 @@ def rA(data, mask):
 def rAt(data, mask):
     assert data.shape[-1] == 2
     data = ifft2(data * mask)
-    data = data[..., 0].unsqueeze(-1)
+    data = (data**2).sum(dim=-1).sqrt().unsqueeze(-1)
+    # data = data[..., 0].unsqueeze(-1)
     return data
 
 
@@ -130,7 +132,8 @@ def rAtA(data, mask):
     data = torch.cat([data, torch.zeros_like(data)], dim=-1)
     data = fft2(data) * mask
     data = ifft2(data)
-    data = data[..., 0].unsqueeze(-1)
+    data = (data**2).sum(dim=-1).sqrt().unsqueeze(-1)
+    # data = data[..., 0].unsqueeze(-1)
     return data
 
 
