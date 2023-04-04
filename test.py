@@ -12,7 +12,6 @@ from data.ixidata import IXIDataset
 from data.fastmridata import FastMRIDataset
 from util.mri_tools import rifft2
 from util.metric import calc_metrics
-import fastmri
 
 from torch.utils.tensorboard import SummaryWriter
 
