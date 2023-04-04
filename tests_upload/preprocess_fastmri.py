@@ -6,6 +6,7 @@ import torch
 import fastmri
 from fastmri.data import transforms as T
 import torchvision
+from util.mri_tools import rifft2
 
 
 '''
@@ -36,13 +37,13 @@ for i, datapath in enumerate(data_train_list):
             print('save {}'.format(datawrite))
 
         if i%10==0:
+            # slice_image = rifft2(slice_kspace)
             slice_image = fastmri.ifft2c(slice_kspace)
             # print(torch.max(slice_kspace), torch.min(slice_kspace))
             slice_image_abs = fastmri.complex_abs(slice_image)
             h,w=slice_image_abs.shape
             # print(torch.max(slice_image_abs), torch.min(slice_image_abs))
             img_stack.append(slice_image_abs.reshape(1,1,h,w))
-
     if i%20==0:
         img_stack = torch.cat(img_stack, dim=0)
         torchvision.utils.save_image(

@@ -168,9 +168,9 @@ class MaskedAutoencoderViT1d(nn.Module):
         self.decoder_norm = norm_layer(decoder_embed_dim)
         self.decoder_pred = nn.Linear(decoder_embed_dim, in_chans*img_size, bias=True) # decoder to patch
         # self.decoder_pred = nn.Conv2d(decoder_embed_dim//img_size, in_chans, 1)
-        self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
-                                        nn.GELU(),
-                                        nn.Linear(128, in_chans*img_size))
+        # self.predictor = nn.Sequential(nn.Linear(in_chans*img_size, 128, bias=True),
+        #                                 nn.GELU(),
+        #                                 nn.Linear(128, in_chans*img_size))
         # --------------------------------------------------------------------------
 
         self.wrap_blocks()
