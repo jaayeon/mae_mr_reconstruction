@@ -9,6 +9,7 @@ from pathlib import Path
 import json
 
 from data.ixidata import IXIDataset
+from data.fastmridata import FastMRIDataset
 from util.mri_tools import rifft2
 from util.metric import calc_metrics
 
@@ -67,7 +68,9 @@ def get_args_parser():
 
 def main(args):
     # misc.init_distributed_mode(args)
-
+    args.output_dir = os.path.join(args.data_path, args.dataset, 'checkpoints')
+    if not os.path.exists(args.output_dir):
+        os.mkdir(args.output_dir)
     args.resume = os.path.join(args.output_dir, args.resume)
     args.output_dir = '/'.join(args.resume.split('/')[:-1])
     base = os.path.basename(args.output_dir)
@@ -82,7 +85,13 @@ def main(args):
     torch.cuda.manual_seed(seed)
     np.random.seed(seed)
 
-    dataset = IXIDataset(args, mode='test')
+    # dataset
+    if args.dataset=='ixi':
+        dataset = IXIDataset(args, mode='test')
+        args.input_size=256
+    elif args.dataset=='fastmri':
+        dataset = FastMRIDataset(args, mode='test')
+        args.input_size=320
     # global_rank = misc.get_rank()
 
     # if global_rank == 0 and args.log_dir is not None:
@@ -95,7 +104,12 @@ def main(args):
         dataset, batch_size=1, num_workers=10, pin_memory=True, drop_last=False
     )
     in_chans = 2 if args.domain=='kspace' else 1
-    model = models.__dict__[args.model](ssl=args.ssl, patch_size=args.patch_size, in_chans=in_chans, domain=args.domain, patch_direction=args.patch_direction)
+    model = models.__dict__[args.model](ssl=args.ssl, 
+                                        patch_size=args.patch_size, 
+                                        img_size=args.input_size,
+                                        in_chans=in_chans, 
+                                        domain=args.domain, 
+                                        patch_direction=args.patch_direction)
 
     model.to(device)
 
@@ -104,7 +118,7 @@ def main(args):
     print('Start test.. best epoch: {}'.format(checkpoint['epoch']))
 
     model.train=False
-    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'psnr_dc', 'noise_ssim', 'ssim', 'ssim_dc', 'noise_nmse', 'nmse']
+    keys = ['noise_loss', 'loss', 'noise_psnr', 'psnr', 'noise_ssim', 'ssim', 'noise_nmse', 'nmse']
     test_stats = {k:0 for k in keys}
     tnum = len(data_loader) if len(data_loader)<args.save_num else args.save_num
 
@@ -133,34 +147,26 @@ def main(args):
             full_samples = data['full'].to(device, non_blocking=True)
             pred  = model(samples, ssl_masks, full_samples)
 
+            isamples, ipred, ifull = rifft2(samples[0,:,:,:], pred[0,:,:,:], full_samples[0,:,:,:], permute=True)
 
-            # Data consistency
-            pred = torch.clamp(pred, min=-1, max=1)
-            pred_dc = samples + pred*ssl_masks
-
-            isamples, ipred, ipred_dc, ifull = rifft2(samples[0,:,:,:], pred[0,:,:,:], pred_dc[0,:,:,:], full_samples[0,:,:,:], permute=True)
-
-            concat_kspace = torch.cat([samples[:,0,:,:], pred[:,0,:,:], pred_dc[:,0,:,:], full_samples[:,0,:,:]], dim=-1).squeeze(0)
+            concat_kspace = torch.cat([samples[:,0,:,:], pred[:,0,:,:], full_samples[:,0,:,:]], dim=-1).squeeze(0)
             #normalization [0-1]
             max = torch.max(isamples)
             min = torch.min(isamples)
             isamples = torch.clamp((isamples-min)/(max-min), min=0, max=1)
             ipred = torch.clamp((ipred-min)/(max-min), min=0, max=1)
-            ipred_dc = torch.clamp((ipred_dc-min)/(max-min), min=0, max=1)
             ifull = torch.clamp((ifull-min)/(max-min), min=0, max=1)
 
             #calculate psnr, ssim
             stat = calc_metrics(isamples.unsqueeze(0), ipred.unsqueeze(0), ifull.unsqueeze(0))
-            stat_dc = calc_metrics(isamples.unsqueeze(0), ipred_dc.unsqueeze(0), ifull.unsqueeze(0))
             for k,v in stat.items():
                 test_stats[k]+=v/tnum
-            test_stats['psnr_dc'] += stat_dc['psnr']/tnum
-            test_stats['ssim_dc'] += stat_dc['ssim']/tnum
+            test_stats['psnr'] += stat['psnr']/tnum
+            test_stats['ssim'] += stat['ssim']/tnum
 
             imageio.imwrite(os.path.join(save_concat_kspace, 'concat_kspace_{:03d}.tif'.format(int(i))), concat_kspace.cpu().numpy())
-            imageio.imwrite(os.path.join(save_pred_dc, 'preddc_{:03d}.tif'.format(int(i))), ipred_dc.squeeze().cpu().numpy())
-            imageio.imwrite(os.path.join(save_pred, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
-            imageio.imwrite(os.path.join(save_concat, 'concat_{:03d}.tif'.format(int(i))), torch.cat([isamples, ipred, ipred_dc, ifull], dim=-1).squeeze().cpu().numpy())
+            imageio.imwrite(os.path.join(save_pred_dc, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
+            imageio.imwrite(os.path.join(save_concat, 'concat_{:03d}.tif'.format(int(i))), torch.cat([isamples, ipred, ifull], dim=-1).squeeze().cpu().numpy())
 
             if args.save_num==i-1:
                 break

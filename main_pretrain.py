@@ -176,10 +176,11 @@ def main(args):
     if args.dataset=='ixi':
         dataset_train = IXIDataset(args, mode='train')
         dataset_valid = IXIDataset(args, mode='valid')
+        args.input_size=256
     elif args.dataset=='fastmri':
         dataset_train = FastMRIDataset(args, mode='train')
         dataset_valid = FastMRIDataset(args, mode='valid')
-
+        args.input_size=320
 
     global_rank = misc.get_rank()
     if args.distributed:
