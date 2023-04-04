@@ -161,8 +161,6 @@ def main(args):
             stat = calc_metrics(isamples.unsqueeze(0), ipred.unsqueeze(0), ifull.unsqueeze(0))
             for k,v in stat.items():
                 test_stats[k]+=v/tnum
-            test_stats['psnr'] += stat['psnr']/tnum
-            test_stats['ssim'] += stat['ssim']/tnum
 
             imageio.imwrite(os.path.join(save_concat_kspace, 'concat_kspace_{:03d}.tif'.format(int(i))), concat_kspace.cpu().numpy())
             imageio.imwrite(os.path.join(save_pred_dc, 'pred_{:03d}.tif'.format(int(i))), ipred.squeeze().cpu().numpy())
