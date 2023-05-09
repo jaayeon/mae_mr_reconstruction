@@ -56,11 +56,11 @@ def train_one_epoch(model: torch.nn.Module,
 
         if args.autocast:
             with torch.cuda.amp.autocast():
-                sploss, imgloss, sslloss, reg = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+                sploss, imgloss, sslloss, advloss = model(down=samples, ssl_masks=ssl_masks, full=full_samples, mask_ratio=args.mask_ratio)
         else: 
-            sploss, imgloss, sslloss, reg = model(samples, ssl_masks, full_samples, mask_ratio=args.mask_ratio)
+            sploss, imgloss, sslloss, advloss = model(down=samples, ssl_masks=ssl_masks, full=full_samples, mask_ratio=args.mask_ratio)
 
-        loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss + args.reg_weight*reg
+        loss = sploss + args.ssl_weight*sslloss + args.img_weight*imgloss + args.adv_weight*advloss
         loss_value = loss.item()
 
         if not math.isfinite(loss_value):
@@ -78,27 +78,31 @@ def train_one_epoch(model: torch.nn.Module,
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(sploss=sploss.item())
-        metric_logger.update(sslloss=sslloss.item())
         metric_logger.update(imgloss=imgloss.item())
+        metric_logger.update(sslloss=sslloss.item())
 
         lr = optimizer.param_groups[0]["lr"]
         metric_logger.update(lr=lr)
 
-        loss_value_reduce = misc.all_reduce_mean(loss_value)
-        sploss_value_reduce = misc.all_reduce_mean(sploss.item())
-        sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
-        imgloss_value_reduce = misc.all_reduce_mean(imgloss.item())
+        # loss_value_reduce = misc.all_reduce_mean(loss_value)
+        # sploss_value_reduce = misc.all_reduce_mean(sploss.item())
+        # sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
+        # imgloss_value_reduce = misc.all_reduce_mean(imgloss.item())
         if log_writer is not None and (data_iter_step + 1) % accum_iter == 0:
             """ We use epoch_1000x as the x-axis in tensorboard.
             This calibrates different curves when batch size changes.
             """
+            loss_value_reduce = misc.all_reduce_mean(loss_value)
+            sploss_value_reduce = misc.all_reduce_mean(sploss.item())
+            sslloss_value_reduce = misc.all_reduce_mean(sslloss.item())
+            imgloss_value_reduce = misc.all_reduce_mean(imgloss.item())
             epoch_1000x = int((data_iter_step / len(data_loader) + epoch) * 1000)
             log_writer.add_scalar('train_loss', loss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sploss', sploss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_sslloss', sslloss_value_reduce, epoch_1000x)
             log_writer.add_scalar('train_imgloss', imgloss_value_reduce, epoch_1000x)
             log_writer.add_scalar('lr', lr, epoch_1000x)
-        
+        torch.cuda.empty_cache()
     #lr scheduler
     if args.lr_scheduler=='cosine':
         lr_scheduler.step()
@@ -135,7 +139,7 @@ def valid_one_epoch(model: torch.nn.Module,
                 samples = samples*(mask.to(samples.device))
                 ssl_masks = smasks.to(samples.device) """
 
-            pred = model(samples, ssl_masks, full, mask_ratio=0)
+            pred = model(down=samples, ssl_masks=ssl_masks, full=full, mask_ratio=0)
             
             if args.domain=='kspace':
                 samples, pred, full = rifft2(samples[0,:,:,:], pred[0,:,:,:], full[0,:,:,:], permute=True) 

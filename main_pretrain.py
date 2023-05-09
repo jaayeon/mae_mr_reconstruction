@@ -53,7 +53,8 @@ def get_args_parser():
     parser.add_argument('--model', default='mae2d_small', type=str, 
                         choices=['mae2d_optim', 'mae2d_large', 'mae2d_base', 'mae2d_small', 'mae1d_large', 'mae1d_base', 'mae1d_small',
                                     'vit2d_large', 'vit2d_base', 'vit2d_small', 'vit1d_large', 'vit1d_base', 'vit1d_small',
-                                    'mae_alt_small', 'vit_alt_small', 'mae_cross_small', 'vit_cross_small', 'swin_small', 'simmim_small'],
+                                    'mae_alt_small', 'vit_alt_small', 'mae_cross_small', 'vit_cross_small', 'swin_small', 'simmim_small', 
+                                    'lvit1d_small', 'lmae1d_small', 'ema_vit1d_small', 'ema_mae1d_small', 'ema_vit2d_small', 'ema_mae2d_small'],
                         metavar='MODEL', help='Name of model to train')
     parser.add_argument('--patch_size', default=16, type=int)
 
@@ -63,7 +64,7 @@ def get_args_parser():
 
     parser.add_argument('--mask_ratio', default=0.25, type=float,
                         help='Masking ratio (percentage of removed patches).')
-    parser.add_argument('--patch_direction', type=str, nargs='+', default='ro', choices=['ro', 'pe', '2d'], help='1D patch direction: readout or phase-encoding')
+    parser.add_argument('--patch_direction', type=str, nargs='+', default='pe', choices=['ro', 'pe', '2d'], help='1D patch direction: readout or phase-encoding')
     parser.add_argument('--guided_attention', default=0., type=float, help='ratio of the number of seed. if 0; random attention will be applied')
 
     parser.add_argument('--norm_pix_loss', action='store_true',
@@ -71,9 +72,9 @@ def get_args_parser():
     parser.set_defaults(norm_pix_loss=False)
     parser.add_argument('--ssl', action='store_true',
                         help='make two different augmentation for each data, and calculate self supervised loss')
-    parser.add_argument('--ssl_weight', type=float, default=1, help='weight of ssl loss related to sp_loss')
-    parser.add_argument('--img_weight', type=float, default=0.01, help='weight of img loss in spatial domain')
-    parser.add_argument('--reg_weight', type=float, default=0, help='weight of regularization term')
+    parser.add_argument('--ssl_weight', type=float, default=0.1, help='weight of ssl loss related to sp_loss')
+    parser.add_argument('--img_weight', type=float, default=0.1, help='weight of img loss in spatial domain')
+    parser.add_argument('--adv_weight', type=float, default=0.01, help='weight of adversarial loss')
     parser.add_argument('--divide_loss', action='store_true', 
                         help='to maximize the entropy, to balance the energy, divide exponential term to each pixel loss')
     # Optimizer parameters
@@ -105,7 +106,7 @@ def get_args_parser():
     parser.add_argument('--domain', default='kspace', choices=['kspace', 'img'])
 
     # Learning
-    parser.add_argument('--output_dir', default='../../data/ixi/checkpoints',
+    parser.add_argument('--output_dir', type=str, default='',
                         help='path where to save, empty for no saving')
     parser.add_argument('--log_dir', default='./output_dir',
                         help='path where to tensorboard log')
@@ -153,10 +154,14 @@ def main(args):
     dt = datetime.datetime.now()
     if not args.resume:
         base = '{}_{}_X{}{}'.format(dt.strftime('%m%d'), args.model, args.downsample, '_'+args.note if args.note!=None else '')
+        args.output_dir = os.path.join(args.data_path, args.dataset, 'checkpoints')
+        if not os.path.exists(args.output_dir):
+            os.mkdir(args.output_dir)
         args.output_dir = os.path.join(args.output_dir, base)
         if not os.path.exists(args.output_dir):
             os.mkdir(args.output_dir)
     else:
+        args.output_dir = os.path.join(args.data_path, args.dataset, 'checkpoints')
         args.resume = os.path.join(args.output_dir, args.resume)
         args.output_dir = '/'.join(args.resume.split('/')[:-1])
         base = os.path.basename(args.output_dir)
@@ -225,9 +230,9 @@ def main(args):
                                         #divide_loss=args.divide_loss,
                                         in_chans=in_chans,
                                         domain=args.domain,
-                                        patch_direction=args.patch_direction,
-                                        guided_attention=args.guided_attention,
-                                        regularize_attnmap=args.reg_weight)
+                                        patch_direction=args.patch_direction)
+                                        # guided_attention=args.guided_attention,
+                                        # regularize_attnmap=args.reg_weight)
     model.to(device)
 
     model_without_ddp = model

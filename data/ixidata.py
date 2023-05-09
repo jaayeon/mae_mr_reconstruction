@@ -59,7 +59,7 @@ class IXIDataset(Dataset):
         #kdata = kdata.permute(2,0,1) #c,h,w
 
         if self.do_downsample:
-            down_kdata, mask = self.downsample(kdata, idx) #mask shape: [1,h,1]
+            down_kdata, mask = self.downsample(kdata, idx) #mask shape: [1,h,1] -> (now) [1,1,w]
             ssl_mask_2d = self.mk_ssl_mask(mask=mask, shape=kdata.shape)
             if self.domain=='img':
                 down_img = rifft2(down_kdata, permute=True)
@@ -113,7 +113,7 @@ class IXIDataset(Dataset):
         pad = (h - self.num_low_freqs + 1) // 2
         center_mask[pad : pad+self.num_low_freqs]=1
         assert center_mask.sum() == self.num_low_freqs
-        center_mask = self.reshape_mask(center_mask, arr.shape)
+        center_mask = self.reshape_mask(center_mask, arr.shape) #[1,1,w]
 
         #acceleration mask
         if self.down=='random': 
@@ -142,9 +142,15 @@ class IXIDataset(Dataset):
 
     def reshape_mask(self, mask:np.ndarray, shape: Sequence[int]) -> torch.Tensor:
         """Reshape mask to desired output shape"""
-        h = shape[-2]
+        # h = shape[-2]
+        # mask_shape = [1 for _ in shape]
+        # mask_shape[-2] = h #[1,h,1]
+        
+        # return torch.from_numpy(mask.reshape(*mask_shape).astype(np.float32))
+
+        w = shape[-1]
         mask_shape = [1 for _ in shape]
-        mask_shape[-2] = h #[1,h,1]
+        mask_shape[-1] = w #[1,1,w]
         
         return torch.from_numpy(mask.reshape(*mask_shape).astype(np.float32))
     

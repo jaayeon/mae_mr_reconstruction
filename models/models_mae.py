@@ -612,11 +612,11 @@ class MaskedAutoencoderViT(nn.Module):
         else: #not train, not ssl
             return predfreq1
 
-    def forward(self, imgs, ssl_masks, full, mask_ratio=0.75):
+    def forward(self, down, ssl_masks, full, mask_ratio=0.75):
         if self.domain=='img':
-            return self.forward_img(imgs, ssl_masks, full, mask_ratio=mask_ratio)
+            return self.forward_img(down, ssl_masks, full, mask_ratio=mask_ratio)
         elif self.domain=='kspace':
-            return self.forward_kspace(imgs, ssl_masks, full, mask_ratio=mask_ratio)
+            return self.forward_kspace(down, ssl_masks, full, mask_ratio=mask_ratio)
         else:
             raise NotImplementedError
 
