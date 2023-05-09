@@ -74,6 +74,11 @@ def train_one_epoch(model: torch.nn.Module,
         if (data_iter_step + 1) % accum_iter == 0:
             optimizer.zero_grad()
 
+        # ema update
+        if 'ema' in args.model:
+            for i in range(len(model.ema_blocks)):
+                model.ema_blocks[i].update()
+                
         torch.cuda.synchronize()
 
         metric_logger.update(loss=loss_value)
