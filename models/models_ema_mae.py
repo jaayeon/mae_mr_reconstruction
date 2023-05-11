@@ -340,8 +340,9 @@ class EMAMaskedAutoencoderViT(nn.Module):
             print('anomaly detected d1')
 
         # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x)
+        with torch.cuda.amp.autocast(enabled=False):
+            for blk in self.decoder_blocks:
+                x = blk(x)
 
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
@@ -354,18 +355,20 @@ class EMAMaskedAutoencoderViT(nn.Module):
         return x
 
 
-    def forward_latent_loss(self, latent1, latent2, avg=True): #0 is keep, 1 is remove
+    def forward_latent_loss(self, latent1, latent2, avg=True, mask=None): #0 is keep, 1 is remove
         if avg: 
             latent1 = sum(latent1)/len(latent1)
             latent2 = sum(latent2)/len(latent2)
             
         N,L1,_ = latent1.shape
-        # mask = ssl_masks[:,0,:,:].squeeze() # N,c,h,w --> N,h,w
-        # mask = mask[:,:,0].unsqueeze(-1)
+
+        if mask is None:
+            mask = torch.ones(N,L1)
 
         loss = torch.abs(latent1-latent2)
         # loss = loss*mask
         loss = loss.mean(dim=-1)
+        loss = loss*mask
         loss = loss.sum() / N
 
         return loss
@@ -388,7 +391,7 @@ class EMAMaskedAutoencoderViT(nn.Module):
 
         if self.mae:
             with torch.no_grad():
-                latent_ema, _, latent_ema_stats = self.forward_encoder(full, ema=True) #no random_masking
+                latent_ema, _, latent_ema_stats = self.forward_encoder(down, ema=True) #no random_masking
         #dc layer
         pred = down + pred*ssl_masks 
 
@@ -405,7 +408,7 @@ class EMAMaskedAutoencoderViT(nn.Module):
             imgloss = self.forward_img_loss(predimg, fullimg)
             zero = torch.tensor([0], device=loss.device)
             if self.mae:
-                latentloss = self.forward_latent_loss(latent_stats[-3:], latent_ema_stats[-3:]) #2blocks output avg loss
+                latentloss = self.forward_latent_loss(latent_stats[-3:], latent_ema_stats[-3:], mask=mask) #2blocks output avg loss
                 return loss, imgloss, latentloss, zero
             else:
                 return loss, imgloss, zero, zero
