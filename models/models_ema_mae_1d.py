@@ -366,8 +366,9 @@ class EMAMaskedAutoencoderViT1d(nn.Module):
             print('anomaly detected d1')
 
         # apply Transformer blocks
-        for blk in self.decoder_blocks:
-            x = blk(x)
+        with torch.cuda.amp.autocast(enabled=False):
+            for blk in self.decoder_blocks:
+                x = blk(x)
 
         if not torch.isfinite(x).all():
             print('anomaly detected d2')
